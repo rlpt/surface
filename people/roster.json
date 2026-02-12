@@ -1,0 +1,10 @@
+[
+  {
+    "id": "richard",
+    "name": "Richard",
+    "email": "richard.targett@gmail.com",
+    "roles": ["engineering", "ops"],
+    "region": "uk",
+    "started": "2024-06-01"
+  }
+]
