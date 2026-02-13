@@ -1,0 +1,6 @@
+# Share events (chronological)
+# Format: <date> <event-type> <holder-id> <share-class> <quantity>
+#   Optional indented lines: vesting <start-date> <months> <cliff-months>
+# Event types: grant, transfer-in, transfer-out, cancel
+
+2024-06-01 grant richard ordinary 1000
