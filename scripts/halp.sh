@@ -8,6 +8,7 @@ echo "Base commands (everyone):"
 echo "  halp       Show this help"
 echo "  whoami     Show your identity, roles, and module status"
 echo "  onboard    Guided setup for new users"
+echo "  accounts   hledger shortcut (accounts bal, accounts is, etc.)"
 echo ""
 
 ROSTER_FILE="${SURFACE_ROOT}/people/roster.json"

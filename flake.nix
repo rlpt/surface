@@ -40,6 +40,7 @@
         halp = pkgs.writeShellScriptBin "halp" (builtins.readFile ./scripts/halp.sh);
         whoami-surface = pkgs.writeShellScriptBin "whoami" (builtins.readFile ./scripts/whoami.sh);
         onboard = pkgs.writeShellScriptBin "onboard" (builtins.readFile ./scripts/onboard.sh);
+        accounts = pkgs.writeShellScriptBin "accounts" (builtins.readFile ./scripts/accounts.sh);
 
         # --- Base packages ---
         basePackages = [
@@ -48,6 +49,7 @@
           halp
           whoami-surface
           onboard
+          accounts
         ];
 
         # Module listing for banner
