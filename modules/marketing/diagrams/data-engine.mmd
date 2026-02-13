@@ -1,0 +1,9 @@
+graph LR
+    A[Write Request] --> B[Validate Schema]
+    B --> C[Append to Transaction Log]
+    C --> D[Immutable Record]
+    D --> E[Current State View]
+    D --> F[Time Travel Query]
+    F --> G[State at Any Point in Time]
+    D --> H[Audit Trail]
+    H --> I[Tamper-Evident Diff]

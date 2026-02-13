@@ -4,3 +4,8 @@
 # Event types: grant, transfer-in, transfer-out, cancel
 
 2024-06-01 grant richard ordinary 1000
+2026-02-13 transfer-out richard ordinary 10
+2026-02-13 transfer-in mark ordinary 10
+2026-02-13 transfer-out richard ordinary 69
+2026-02-13 transfer-in emma ordinary 69
+2026-02-13 grant richard ordinary 7079

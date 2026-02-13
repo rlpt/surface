@@ -1,0 +1,19 @@
+graph TD
+    Org[Organization] --> WS1[Workspace A]
+    Org --> WS2[Workspace B]
+
+    WS1 --> R1[Admin Role]
+    WS1 --> R2[Editor Role]
+    WS1 --> R3[Viewer Role]
+
+    R1 --> P1[Manage plans]
+    R1 --> P2[Manage fills]
+    R1 --> P3[Manage users]
+    R1 --> P4[View audit trail]
+
+    R2 --> P1
+    R2 --> P2
+    R2 --> P5[View plans]
+
+    R3 --> P5
+    R3 --> P6[View fills]

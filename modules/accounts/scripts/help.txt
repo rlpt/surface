@@ -1,0 +1,7 @@
+Accounts (hledger bookkeeping):
+  accounts bal [acct]         Current balances (optionally filter by account)
+  accounts is [-p period]     Income statement
+  accounts bs                 Balance sheet
+  accounts reg <acct>         Transaction register for an account
+  accounts stats              Journal health (date range, txn count)
+  accounts check              Validate balanced entries and declared accounts

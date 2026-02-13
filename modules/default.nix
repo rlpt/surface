@@ -1,4 +1,4 @@
-{ pkgs }:
+{ pkgs, surface }:
 
 let
   contents = builtins.readDir ./.;
@@ -6,4 +6,4 @@ let
     (name: contents.${name} == "directory")
     (builtins.attrNames contents);
 in
-builtins.map (name: import (./. + "/${name}") { inherit pkgs; }) dirNames
+builtins.map (name: import (./. + "/${name}") { inherit pkgs surface; }) dirNames

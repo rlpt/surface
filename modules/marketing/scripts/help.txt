@@ -1,0 +1,6 @@
+Marketing (decks, handbook & diagrams):
+  marketing serve             Live preview decks with hot reload
+  marketing build             Build all decks to out/marketing/
+  marketing handbook-build    Build handbook to out/marketing/handbook/
+  marketing handbook-serve    Build + serve handbook at :8000
+  marketing diagrams          Build .mmd diagrams to out/marketing/diagrams/

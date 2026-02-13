@@ -23,13 +23,21 @@
           (builtins.map (r: r.packages) (builtins.attrValues roles));
 
         # --- Modules (child directories, auto-discovered) ---
-        modules = import ./modules { inherit pkgs; };
+        surface = { inherit roster roles; };
+        modules = import ./modules { inherit pkgs surface; };
 
         modulePackages = builtins.concatLists
           (builtins.map (m: m.packages) modules);
 
         moduleNames = builtins.map (m: m.name) modules;
         moduleCount = builtins.length modules;
+
+        moduleScripts = builtins.concatLists
+          (builtins.map (m: m.scripts or []) modules);
+
+        moduleHelpText = builtins.concatStringsSep "\n"
+          (builtins.filter (s: s != "")
+            (builtins.map (m: m.helpText or "") modules));
 
         # --- Roles JSON for scripts ---
         rolesJson = builtins.toJSON (builtins.mapAttrs (name: role: {
@@ -40,7 +48,6 @@
         halp = pkgs.writeShellScriptBin "halp" (builtins.readFile ./scripts/halp.sh);
         whoami-surface = pkgs.writeShellScriptBin "whoami" (builtins.readFile ./scripts/whoami.sh);
         onboard = pkgs.writeShellScriptBin "onboard" (builtins.readFile ./scripts/onboard.sh);
-        accounts = pkgs.writeShellScriptBin "accounts" (builtins.readFile ./scripts/accounts.sh);
 
         # --- Base packages ---
         basePackages = [
@@ -49,7 +56,6 @@
           halp
           whoami-surface
           onboard
-          accounts
         ];
 
         # Module listing for banner
@@ -59,9 +65,10 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          buildInputs = basePackages ++ allRolePackages ++ modulePackages;
+          buildInputs = basePackages ++ allRolePackages ++ modulePackages ++ moduleScripts;
 
           SURFACE_MODULES = builtins.concatStringsSep "," moduleNames;
+          SURFACE_MODULE_HELP = moduleHelpText;
 
           shellHook = ''
             # Set SURFACE_ROOT to the actual working directory (not nix store)

@@ -1830,6 +1830,14 @@ The LLM never has more permissions than the active user. This isn't enforced by 
 
 The enforcement is **physical, not policy**. The LLM runs as a process in the user's shell. It has the user's filesystem, the user's SSH keys, the user's git config. It literally cannot reach what the user cannot reach. There is no API key that grants the LLM separate access. There is no service account. The LLM is the user.
 
+### Sanctum — the innermost ring
+
+The sanctum is the smallest, most privileged access zone: the people who have full access to application source code and the NixOS environment. Their identities and SSH keys are defined directly in the nix config. This is the hardest boundary — you're either in the sanctum or you're not.
+
+Who belongs here: product engineers, and potentially a small number of infra people. Nobody else. This group should stay as small as possible. Every person in the sanctum can read all source, modify the NixOS configuration, and deploy. They are the people who can change what the company *is*, not just what it *does*.
+
+The sanctum is controlled by nix, not by policy. If your SSH key isn't in the config, you don't have access — there's no override, no admin panel, no escalation path. Adding someone to the sanctum is a nix change, committed to git, reviewed in a PR, deployed. Removing them is the same. The wake records both.
+
 ### Layer summary
 
 | Layer | Mechanism | Boundary |

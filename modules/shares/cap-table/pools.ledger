@@ -1,0 +1,12 @@
+# Pool declarations
+# Format: pool <name> <share-class> <budget>
+#   Optional indented lines: member <holder-id>
+
+pool founder ordinary 8000
+    member richard
+
+pool supporter ordinary 1000
+    member mark
+    member emma
+
+pool investment ordinary 1000

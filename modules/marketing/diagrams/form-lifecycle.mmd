@@ -1,0 +1,25 @@
+stateDiagram-v2
+    [*] --> Plan: Create form plan
+    Plan --> Published: Publish
+    Published --> Fill: User starts fill
+    Fill --> Fill: Save progress
+    Fill --> Submitted: Submit
+    Submitted --> Audited: Review & audit
+    Audited --> [*]
+
+    state Plan {
+        [*] --> DefineSchema
+        DefineSchema --> ConfigureDisplayRules
+        ConfigureDisplayRules --> SetPermissions
+    }
+
+    state Fill {
+        [*] --> InProgress
+        InProgress --> InProgress: Auto-save
+        InProgress --> InProgress: Collaborator edits
+    }
+
+    state Audited {
+        [*] --> AuditTrail
+        AuditTrail --> TimeTravel: Rewind to any version
+    }

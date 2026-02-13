@@ -7,6 +7,7 @@ Plain-text share allocation tracking. Ledger files live at `modules/shares/cap-t
 - `classes.ledger` — share class declarations (name, nominal value, authorised count)
 - `holders.ledger` — shareholder declarations (id, display name)
 - `events.ledger` — all share events in chronological order
+- `pools.ledger` — pool budgets and member assignments
 
 ## Ledger formats
 
@@ -43,6 +44,22 @@ Example:
     vesting 2024-06-01 48 12
 ```
 
+### pools.ledger
+
+```
+pool <name> <share-class> <budget>
+    member <holder-id>
+```
+
+The member line is optional and indented with 4 spaces. Pools without members track unallocated reserves.
+
+Example:
+```
+pool supporter ordinary 1000
+    member mark
+    member emma
+```
+
 ## Workflow: adding a share event
 
 1. Read `classes.ledger` to find valid share class names
@@ -62,4 +79,10 @@ All commands use the `shares` shell alias.
 - `shares holders` — list all shareholders with totals
 - `shares history` — all events chronologically
 - `shares history <holder-id>` — events for a specific holder
+- `shares pools` — show pool budgets, usage, and remaining availability
 - `shares check` — validate ledger consistency
+- `shares pdf table --output cap-table.pdf` — cap table as PDF
+- `shares pdf history --output history.pdf` — full event history as PDF
+- `shares pdf holder <id> --output statement.pdf` — individual holder statement as PDF
+
+PDF reports use pandoc + typst. Omit `--output` to write PDF to stdout.

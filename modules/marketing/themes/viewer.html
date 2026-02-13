@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>$if(title)$$title$ — $endif$$if(brand-name)$$brand-name$$else$Docs$endif$</title>
+  <link rel="stylesheet" href="$if(root-path)$$root-path$$else$.$endif$/viewer.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="$if(root-path)$$root-path$$else$.$endif$/index.html">
+      <h1>$if(brand-name)$$brand-name$$else$Docs$endif$</h1>
+      <span class="subtitle">Docs</span>
+    </a>
+    <div class="search-wrapper">
+      <span class="search-icon">&#128269;</span>
+      <input type="text" id="search-input" placeholder="Search docs..." autocomplete="off">
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <div id="dir-tree"></div>
+  </aside>
+
+  <main>
+$body$
+  </main>
+
+  <script>
+    var VIEWER_ROOT = '$if(root-path)$$root-path$$else$.$endif$';
+    var VIEWER_PAGE_PATH = '$if(page-path)$$page-path$$endif$';
+  </script>
+  <script src="$if(root-path)$$root-path$$else$.$endif$/viewer.js"></script>
+</body>
+</html>
