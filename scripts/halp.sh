@@ -24,10 +24,9 @@ if [ -n "$GIT_EMAIL" ] && [ -f "$ROSTER_FILE" ]; then
     "$ROSTER_FILE" 2>/dev/null || echo "[]")
 fi
 
-ROLES_FILE="${SURFACE_ROOT}/roles/roles.json"
-if [ -f "$ROLES_FILE" ]; then
-  for role in $(jq -r 'keys[]' "$ROLES_FILE"); do
-    desc=$(jq -r --arg r "$role" '.[$r].description' "$ROLES_FILE")
+if [ -n "${SURFACE_ROLES_JSON:-}" ]; then
+  for role in $(echo "$SURFACE_ROLES_JSON" | jq -r 'keys[]'); do
+    desc=$(echo "$SURFACE_ROLES_JSON" | jq -r --arg r "$role" '.[$r].description')
     has_role=$(echo "$USER_ROLES" | jq --arg r "$role" 'index($r) != null')
     if [ "$has_role" = "true" ]; then
       echo "[$role] $desc  ✓ (your role)"

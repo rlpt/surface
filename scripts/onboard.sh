@@ -42,10 +42,9 @@ echo "Region: $REGION"
 echo ""
 
 echo "Your roles:"
-ROLES_FILE="${SURFACE_ROOT}/roles/roles.json"
 for role in $ROLES; do
-  if [ -f "$ROLES_FILE" ]; then
-    desc=$(jq -r --arg r "$role" '.[$r].description // "No description"' "$ROLES_FILE")
+  if [ -n "${SURFACE_ROLES_JSON:-}" ]; then
+    desc=$(echo "$SURFACE_ROLES_JSON" | jq -r --arg r "$role" '.[$r].description // "No description"')
     echo "  - $role: $desc"
   else
     echo "  - $role"

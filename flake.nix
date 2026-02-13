@@ -32,12 +32,16 @@
         moduleNames = builtins.map (m: m.name) modules;
         moduleCount = builtins.length modules;
 
-        moduleScripts = builtins.concatLists
-          (builtins.map (m: m.scripts or []) modules);
+        modulesByName = builtins.listToAttrs
+          (builtins.map (m: { name = m.name; value = m; }) modules);
 
         moduleHelpText = builtins.concatStringsSep "\n"
           (builtins.filter (s: s != "")
-            (builtins.map (m: m.helpText or "") modules));
+            (builtins.map (m: m.helpText) modules));
+
+        moduleShellHooks = builtins.concatStringsSep "\n"
+          (builtins.filter (s: s != "")
+            (builtins.map (m: m.shellHook) modules));
 
         # --- Roles JSON for scripts ---
         rolesJson = builtins.toJSON (builtins.mapAttrs (name: role: {
@@ -65,10 +69,11 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          buildInputs = basePackages ++ allRolePackages ++ modulePackages ++ moduleScripts;
+          buildInputs = basePackages ++ allRolePackages ++ modulePackages;
 
           SURFACE_MODULES = builtins.concatStringsSep "," moduleNames;
           SURFACE_MODULE_HELP = moduleHelpText;
+          SURFACE_ROLES_JSON = rolesJson;
 
           shellHook = ''
             # Set SURFACE_ROOT to the actual working directory (not nix store)
@@ -77,11 +82,8 @@
             # Ensure our custom scripts shadow coreutils (whoami)
             export PATH="${whoami-surface}/bin:$PATH"
 
-            # Write roles.json for scripts to read
-            mkdir -p "$SURFACE_ROOT/roles"
-            cat > "$SURFACE_ROOT/roles/roles.json" << 'ROLES_EOF'
-            ${rolesJson}
-            ROLES_EOF
+            # Run module shell hooks
+            ${moduleShellHooks}
 
             # Detect user
             GIT_EMAIL=$(git config user.email 2>/dev/null || echo "")
