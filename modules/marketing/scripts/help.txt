@@ -1,6 +1,11 @@
-Marketing (decks, handbook & diagrams):
+Marketing (decks, handbook, legal docs, diagrams & docs):
   marketing serve             Live preview decks with hot reload
   marketing build             Build all decks to out/marketing/
   marketing handbook-build    Build handbook to out/marketing/handbook/
   marketing handbook-serve    Build + serve handbook at :8000
+  marketing legal-build       Build legal docs to out/marketing/legal/
+  marketing legal-serve       Build + serve legal handbook at :8001
+  marketing legal-pdf <file>  Build a legal doc to PDF (or --all)
   marketing diagrams          Build .mmd diagrams to out/marketing/diagrams/
+  marketing push-doc <file>   Push markdown to Google Docs (formatted)
+  marketing push-doc-setup    One-time Google Drive OAuth setup

@@ -10,6 +10,9 @@ let
       && builtins.pathExists (./. + "/${name}/default.nix"))
     (builtins.attrNames contents);
 
+  # Extend surface so modules can reference each other (lazy — no strict cycle)
+  surface' = surface // { modules = modulesByName; };
+
   # Apply defaults and merge scripts into packages
   normalize = dirName: raw:
     let
@@ -29,8 +32,13 @@ let
         packages = merged.packages ++ scripts;
       }) [ "scripts" ];
 
+  enabledModules = builtins.filter (m: m.enabled)
+    (builtins.map
+      (dirName: normalize dirName (import (./. + "/${dirName}") { pkgs = pkgs; surface = surface'; }))
+      dirNames);
+
+  modulesByName = builtins.listToAttrs
+    (builtins.map (m: { name = m.name; value = m; }) enabledModules);
+
 in
-builtins.filter (m: m.enabled)
-  (builtins.map
-    (dirName: normalize dirName (import (./. + "/${dirName}") { inherit pkgs surface; }))
-    dirNames)
+enabledModules

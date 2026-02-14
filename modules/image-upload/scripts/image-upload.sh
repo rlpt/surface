@@ -21,7 +21,10 @@ cmd_help() {
 
 cmd_upload() {
   echo "Creating upload session..."
-  RESPONSE=$(curl -s -X POST "$BASE_URL/api/session")
+  if ! RESPONSE=$(curl -s --connect-timeout 5 --max-time 10 -X POST "$BASE_URL/api/session"); then
+    echo "Error: Could not reach $BASE_URL (is the server running?)"
+    exit 1
+  fi
   SESSION_ID=$(echo "$RESPONSE" | jq -r '.session_id')
   UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url')
 
@@ -43,7 +46,7 @@ cmd_upload() {
   TIMEOUT=300
   ELAPSED=0
   while [ $ELAPSED -lt $TIMEOUT ]; do
-    STATUS=$(curl -s "$BASE_URL/$SESSION_ID/status")
+    STATUS=$(curl -s --connect-timeout 5 --max-time 10 "$BASE_URL/$SESSION_ID/status")
     UPLOAD_STATUS=$(echo "$STATUS" | jq -r '.status')
 
     if [ "$UPLOAD_STATUS" = "ready" ]; then
@@ -54,7 +57,7 @@ cmd_upload() {
       mkdir -p "$LOCAL_DIR"
       LOCAL_PATH="$LOCAL_DIR/$FILENAME"
 
-      curl -s -o "$LOCAL_PATH" "$BASE_URL/$SESSION_ID/image"
+      curl -s --connect-timeout 5 --max-time 30 -o "$LOCAL_PATH" "$BASE_URL/$SESSION_ID/image"
 
       echo ""
       echo "$LOCAL_PATH"

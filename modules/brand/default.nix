@@ -20,6 +20,6 @@
   helpText = ''
     Brand identity data (logo, colours, strap line).
     Logo: modules/brand/logo.svg
-    Access brand values via the module's identity attribute in nix.
+    Access brand values via surface.modules.brand.identity in sibling modules.
   '';
 }
