@@ -1,49 +1,50 @@
 # Accounts Module — LLM Context
 
-Plain-text double-entry bookkeeping using hledger. Journals live at `modules/accounts/books/`.
+Double-entry bookkeeping stored in Dolt. Data lives in the `accounts`, `transactions`, and `postings` tables.
 
-## File layout
+## Tables
 
-- `main.journal` — entry point, includes everything below
-- `accounts.journal` — chart of accounts (all `account` declarations)
-- `2024.journal`, `2025.journal`, `2026.journal` — transactions by year
+- `accounts` — chart of accounts (path, account_type)
+- `transactions` — transaction headers (txn_date, payee, description)
+- `postings` — line items (txn_id, account_path, amount, currency)
+
+## Views
+
+- `account_balances` — aggregated balances per account
 
 ## Workflow: adding a transaction
 
-1. Read `accounts.journal` to find the correct account names
-2. Read the current year file to match the existing style
-3. Append the new transaction to the current year file
-4. Run `hledger -f modules/accounts/books/main.journal check` to validate
+1. Check valid accounts: `data sql "SELECT path FROM accounts ORDER BY path;"`
+2. Insert the transaction:
+   ```sql
+   INSERT INTO transactions (txn_date, payee, description)
+     VALUES ('2026-03-09', 'AWS', 'Monthly hosting');
+   INSERT INTO postings (txn_id, account_path, amount)
+     VALUES (LAST_INSERT_ID(), 'expenses:infra:hosting', 45.00);
+   INSERT INTO postings (txn_id, account_path, amount)
+     VALUES (LAST_INSERT_ID(), 'assets:bank:tide', -45.00);
+   ```
+3. Validate: `accounts check`
+4. Commit: `data commit -m "add AWS hosting payment"`
 
-Always follow this order. Never skip the validation step.
+Postings must sum to zero per transaction (double-entry). Positive = debit, negative = credit.
 
-## Transaction format
+## Workflow: adding an account
 
-```journal
-2026-02-07 Stripe | Customer payments payout
-    assets:bank:tide              £1,840.00
-    revenue:sales
+```sql
+INSERT INTO accounts (path, account_type) VALUES ('expenses:marketing:ads', 'expenses');
 ```
 
-- Date: `YYYY-MM-DD`
-- Payee and description separated by ` | `
-- Four-space indent for postings
-- Currency symbol before amount, no space (`£34.21`)
-- One blank line between transactions
-- Second posting amount can be omitted (hledger infers the balancing amount)
-
-## Common hledger commands
-
-All commands use `-f modules/accounts/books/main.journal` (or the `accounts` shell alias).
+## Common commands
 
 - `accounts bal` — current balances across all accounts
 - `accounts bal expenses:infra` — balance for a subtree
-- `accounts is -p 'feb 2026'` — income statement for a period
+- `accounts is [-p period]` — income statement
 - `accounts bs` — balance sheet
-- `accounts reg assets:bank:tide` — transaction register for an account
-- `accounts stats` — journal health (date range, txn count)
+- `accounts reg <acct>` — transaction register for an account
+- `accounts stats` — account and transaction counts
 - `accounts check` — validate balanced entries and declared accounts
-- `accounts check accounts` — specifically check all postings use declared accounts
+- `accounts list` — list all declared accounts
 
 ## Account tree (current)
 
@@ -59,4 +60,4 @@ revenue:{sales,consulting}
 equity:opening-balances
 ```
 
-New accounts: add to `accounts.journal`, then use in transactions.
+New accounts: INSERT into `accounts` table, then use in postings.

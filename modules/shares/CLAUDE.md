@@ -1,88 +1,56 @@
 # Shares Module — LLM Context
 
-Plain-text share allocation tracking. Ledger files live at `modules/shares/cap-table/`.
+Share allocation tracking stored in Dolt. Data lives in the `share_classes`, `holders`, `share_events`, `pools`, and `pool_members` tables.
 
-## File layout
+## Tables
 
-- `classes.ledger` — share class declarations (name, nominal value, authorised count)
-- `holders.ledger` — shareholder declarations (id, display name)
-- `events.ledger` — all share events in chronological order
-- `pools.ledger` — pool budgets and member assignments
+- `share_classes` — class definitions (name, nominal_value, nominal_currency, authorised)
+- `holders` — shareholder declarations (id, display_name)
+- `share_events` — all events chronologically (event_date, event_type, holder_id, share_class, quantity, optional vesting fields)
+- `pools` — pool budgets (name, share_class, budget)
+- `pool_members` — pool membership (pool_name, holder_id)
 
-## Ledger formats
+## Views
 
-### classes.ledger
-
-```
-class <name> <nominal-value> <authorised-count>
-```
-
-Example: `class ordinary £0.01 1000`
-
-### holders.ledger
-
-```
-holder <id> <display-name>
-```
-
-Example: `holder richard Richard Targett`
-
-### events.ledger
-
-```
-<date> <event-type> <holder-id> <share-class> <quantity>
-    vesting <start-date> <months> <cliff-months>
-```
-
-Event types: `grant`, `transfer-in`, `transfer-out`, `cancel`
-
-The vesting line is optional and indented with 4 spaces. If omitted, shares are fully vested immediately.
-
-Example:
-```
-2024-06-01 grant richard ordinary 500
-    vesting 2024-06-01 48 12
-```
-
-### pools.ledger
-
-```
-pool <name> <share-class> <budget>
-    member <holder-id>
-```
-
-The member line is optional and indented with 4 spaces. Pools without members track unallocated reserves.
-
-Example:
-```
-pool supporter ordinary 1000
-    member mark
-    member emma
-```
+- `holdings` — computed current holdings per holder/class
+- `cap_table` — full cap table with percentages
+- `class_availability` — issued vs authorised per class
 
 ## Workflow: adding a share event
 
-1. Read `classes.ledger` to find valid share class names
-2. Read `holders.ledger` to find valid holder IDs (add new holder first if needed)
-3. Read `events.ledger` to see existing events and match style
-4. Append the new event to `events.ledger`
-5. Run `shares check` to validate
+1. Check valid holders: `data sql "SELECT id, display_name FROM holders;"`
+2. Check valid classes: `data sql "SELECT name, authorised FROM share_classes;"`
+3. Insert the event:
+   ```sql
+   INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity)
+     VALUES ('2026-03-09', 'grant', 'alice', 'ordinary', 500);
+   ```
+4. Validate: `shares check`
+5. Commit: `data commit -m "grant 500 ordinary to alice"`
 
-Always follow this order. Never skip the validation step.
+Event types: `grant`, `transfer-in`, `transfer-out`, `cancel`
 
-## Common shares commands
+For vesting:
+```sql
+INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity, vesting_start, vesting_months, vesting_cliff_months)
+  VALUES ('2026-03-09', 'grant', 'alice', 'ordinary', 500, '2026-03-09', 48, 12);
+```
 
-All commands use the `shares` shell alias.
+## Workflow: adding a holder
 
-- `shares table` — current cap table with percentages and vesting
-- `shares export` — CSV output to stdout (pipe to file for spreadsheet)
+```sql
+INSERT INTO holders (id, display_name) VALUES ('alice', 'Alice Smith');
+```
+
+## Common commands
+
+- `shares table` — current cap table with percentages
+- `shares export` — CSV output
 - `shares holders` — list all shareholders with totals
-- `shares history` — all events chronologically
-- `shares history <holder-id>` — events for a specific holder
-- `shares pools` — show pool budgets, usage, and remaining availability
-- `shares check` — validate ledger consistency
-- `shares pdf table --output cap-table.pdf` — cap table as PDF
-- `shares pdf history --output history.pdf` — full event history as PDF
-- `shares pdf holder <id> --output statement.pdf` — individual holder statement as PDF
-
-PDF reports use pandoc + typst. Omit `--output` to write PDF to stdout.
+- `shares history [holder]` — all events (optionally filtered)
+- `shares pools` — pool budgets, usage, and availability
+- `shares check` — validate consistency
+- `shares brief` — compact context dump for agent warm-up
+- `shares pdf table` — cap table as PDF
+- `shares pdf history` — event history as PDF
+- `shares pdf holder <id>` — individual holder statement as PDF

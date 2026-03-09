@@ -1,4 +1,4 @@
-Shares (cap table management):
+Shares (cap table management — dolt):
   shares table                Show cap table with percentages and vesting
   shares export               Output cap table as CSV
   shares holders              List all shareholders with totals

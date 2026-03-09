@@ -2,8 +2,8 @@
 
 {
   name = "accounts";
-  description = "Plain-text bookkeeping (hledger)";
-  packages = with pkgs; [ hledger ];
+  description = "Double-entry bookkeeping (dolt)";
+  packages = [];
   scripts = [
     (pkgs.writeShellScriptBin "accounts" (builtins.readFile ./scripts/accounts.sh))
   ];

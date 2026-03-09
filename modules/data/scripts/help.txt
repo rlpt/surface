@@ -1,0 +1,10 @@
+Data (dolt database):
+  data init                 Initialise the database (schema + seed data)
+  data reset                Drop and recreate the database
+  data status               Show tables and row counts
+  data sql [query]          Run a SQL query (or open interactive shell)
+  data log                  Show dolt commit history
+  data diff [ref]           Show uncommitted changes
+  data commit -m 'msg'      Commit current changes
+  data branch [name]        List or create branches
+  data checkout <branch>    Switch branches

@@ -2,6 +2,10 @@
 
 Auto-discovered child directories under `modules/`. Each module is a `default.nix` that receives `{ pkgs, surface, ... }` and returns an attrset.
 
+## Data layer
+
+Structured data (accounts, shares, pools, holders) is stored in a Dolt database at `$SURFACE_DB` (`.surface-db/`, gitignored). The `data` module auto-initialises it on shell entry from `modules/data/schema.sql` and `modules/data/seed.sql`. Query with `data sql "SELECT ..."` or use module commands (`accounts bal`, `shares table`). Version data changes with `data commit -m "msg"`.
+
 ## Module contract
 
 | Attribute   | Required | Default | Description                                    |

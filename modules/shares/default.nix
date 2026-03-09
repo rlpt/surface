@@ -2,7 +2,7 @@
 
 {
   name = "shares";
-  description = "Plain-text share allocation tracking (cap table)";
+  description = "Share allocation tracking — cap table (dolt)";
   packages = with pkgs; [ pandoc typst ];
   scripts = [
     (pkgs.writeShellScriptBin "shares" (builtins.readFile ./scripts/shares.sh))
