@@ -57,9 +57,10 @@ INSERT INTO share_events (event_date, event_type, holder_id, share_class, quanti
 -- ============================================================
 
 INSERT INTO pools (name, share_class, budget) VALUES
-  ('founder',    'ordinary', 8000),
-  ('supporter',  'ordinary', 1000),
-  ('investment', 'ordinary', 1000);
+  ('founder',        'ordinary', 8000),
+  ('supporter',      'ordinary', 1000),
+  ('early-supporter', 'ordinary', 81),
+  ('investment',     'ordinary', 1000);
 
 INSERT INTO pool_members (pool_name, holder_id) VALUES
   ('founder',   'richard'),
