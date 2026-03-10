@@ -216,6 +216,127 @@ cmd_brief() {
   done
 }
 
+# --- Mutation commands ---
+
+cmd_grant() {
+  local holder="${1:-}" class="${2:-}" qty="${3:-}"
+  [ -z "$holder" ] || [ -z "$class" ] || [ -z "$qty" ] && die "usage: shares grant <holder-id> <class> <quantity>"
+
+  # Validate holder exists
+  local hname
+  hname=$(dsql_csv "SELECT display_name FROM holders WHERE id = '${holder}';" | tail -n +2)
+  [ -z "$hname" ] && die "unknown holder: $holder"
+
+  # Validate class exists
+  local cauth
+  cauth=$(dsql_csv "SELECT authorised FROM share_classes WHERE name = '${class}';" | tail -n +2)
+  [ -z "$cauth" ] && die "unknown share class: $class"
+
+  # Check availability
+  local avail
+  avail=$(dsql_csv "SELECT available FROM class_availability WHERE class = '${class}';" | tail -n +2)
+  if [ "$qty" -gt "$avail" ]; then
+    die "insufficient shares: requested $qty but only $avail available in class '$class'"
+  fi
+
+  local today
+  today=$(date +%Y-%m-%d)
+  dsql "INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity) VALUES ('${today}', 'grant', '${holder}', '${class}', ${qty});"
+  (cd "$SURFACE_DB" && dolt add . && dolt commit -m "grant ${qty} ${class} to ${holder}")
+
+  echo "Granted ${qty} ${class} shares to ${hname}"
+  echo ""
+  cmd_table
+}
+
+cmd_transfer() {
+  local from="${1:-}" to="${2:-}" class="${3:-}" qty="${4:-}"
+  [ -z "$from" ] || [ -z "$to" ] || [ -z "$class" ] || [ -z "$qty" ] && die "usage: shares transfer <from-id> <to-id> <class> <quantity>"
+
+  # Validate both holders exist
+  local fname
+  fname=$(dsql_csv "SELECT display_name FROM holders WHERE id = '${from}';" | tail -n +2)
+  [ -z "$fname" ] && die "unknown holder: $from"
+
+  local tname
+  tname=$(dsql_csv "SELECT display_name FROM holders WHERE id = '${to}';" | tail -n +2)
+  [ -z "$tname" ] && die "unknown holder: $to"
+
+  # Check sender has enough
+  local held
+  held=$(dsql_csv "SELECT COALESCE(shares_held, 0) FROM holdings WHERE holder_id = '${from}' AND share_class = '${class}';" | tail -n +2)
+  held="${held:-0}"
+  if [ "$qty" -gt "$held" ]; then
+    die "${fname} only holds ${held} ${class} shares, cannot transfer ${qty}"
+  fi
+
+  local today
+  today=$(date +%Y-%m-%d)
+  dsql "
+    INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity) VALUES
+      ('${today}', 'transfer-out', '${from}', '${class}', ${qty}),
+      ('${today}', 'transfer-in',  '${to}',   '${class}', ${qty});
+  "
+  (cd "$SURFACE_DB" && dolt add . && dolt commit -m "transfer ${qty} ${class} from ${from} to ${to}")
+
+  echo "Transferred ${qty} ${class} shares: ${fname} -> ${tname}"
+  echo ""
+  cmd_table
+}
+
+cmd_add_holder() {
+  local id="${1:-}" name="${2:-}"
+  [ -z "$id" ] || [ -z "$name" ] && die "usage: shares add-holder <id> \"Display Name\""
+
+  # Check not duplicate
+  local existing
+  existing=$(dsql_csv "SELECT id FROM holders WHERE id = '${id}';" | tail -n +2)
+  [ -n "$existing" ] && die "holder '$id' already exists"
+
+  dsql "INSERT INTO holders (id, display_name) VALUES ('${id}', '${name}');"
+  (cd "$SURFACE_DB" && dolt add . && dolt commit -m "add holder: ${name} (${id})")
+
+  echo "Added holder: ${name} (${id})"
+}
+
+cmd_add_pool() {
+  local name="${1:-}" class="${2:-}" budget="${3:-}"
+  [ -z "$name" ] || [ -z "$class" ] || [ -z "$budget" ] && die "usage: shares add-pool <name> <class> <budget>"
+
+  local cauth
+  cauth=$(dsql_csv "SELECT authorised FROM share_classes WHERE name = '${class}';" | tail -n +2)
+  [ -z "$cauth" ] && die "unknown share class: $class"
+
+  dsql "INSERT INTO pools (name, share_class, budget) VALUES ('${name}', '${class}', ${budget});"
+  (cd "$SURFACE_DB" && dolt add . && dolt commit -m "add pool: ${name} (${budget} ${class})")
+
+  echo "Added pool: ${name} — ${budget} ${class} shares"
+}
+
+cmd_pool_add() {
+  local pool="${1:-}" holder="${2:-}"
+  [ -z "$pool" ] || [ -z "$holder" ] && die "usage: shares pool-add <pool> <holder-id>"
+
+  local pname
+  pname=$(dsql_csv "SELECT name FROM pools WHERE name = '${pool}';" | tail -n +2)
+  [ -z "$pname" ] && die "unknown pool: $pool"
+
+  local hname
+  hname=$(dsql_csv "SELECT display_name FROM holders WHERE id = '${holder}';" | tail -n +2)
+  [ -z "$hname" ] && die "unknown holder: $holder"
+
+  dsql "INSERT INTO pool_members (pool_name, holder_id) VALUES ('${pool}', '${holder}');"
+  (cd "$SURFACE_DB" && dolt add . && dolt commit -m "add ${holder} to pool ${pool}")
+
+  echo "Added ${hname} to pool ${pool}"
+}
+
+cmd_push() {
+  local subcmd="${1:-}"
+  shift || true
+  PYTHONPATH="" python3 "$SURFACE_ROOT/modules/shares/scripts/push.py" "$subcmd" "$@"
+}
+
 # --- PDF helpers ---
 
 generate_pdf() {
@@ -357,28 +478,45 @@ cmd_help() {
   echo ""
   echo "Usage: shares <command> [args]"
   echo ""
-  echo "Commands:"
-  echo "  table              Show current cap table with percentages"
-  echo "  export             Output cap table as CSV"
-  echo "  holders            List all shareholders with totals"
-  echo "  history [holder]   Show share events (optionally filter by holder)"
-  echo "  pools              Show pool budgets and usage"
-  echo "  check              Validate ledger consistency"
-  echo "  brief              Dump compact context for agent warm-up"
-  echo "  pdf <type>         Generate PDF report (table, history, holder)"
-  echo "  help               Show this help"
+  echo "Read:"
+  echo "  table                              Cap table with percentages"
+  echo "  export                             Cap table as CSV"
+  echo "  holders                            List all shareholders"
+  echo "  history [holder]                   Share events (optionally filtered)"
+  echo "  pools                              Pool budgets and usage"
+  echo "  check                              Validate consistency"
+  echo "  brief                              Context dump for agent warm-up"
+  echo ""
+  echo "Write:"
+  echo "  grant <holder> <class> <qty>       Grant shares"
+  echo "  transfer <from> <to> <class> <qty> Transfer shares"
+  echo "  add-holder <id> \"Name\"             Add a shareholder"
+  echo "  add-pool <name> <class> <budget>   Create a share pool"
+  echo "  pool-add <pool> <holder>           Add holder to pool"
+  echo ""
+  echo "Export:"
+  echo "  pdf <table|history|holder <id>>    Generate PDF"
+  echo "  push <table|history|holders|pools|all>  Push to Google Sheets"
+  echo ""
+  echo "  push requires: GOOGLE_SERVICE_ACCOUNT_KEY, SHARES_SHEET_ID"
 }
 
 # --- Routing ---
 
 case "${1:-help}" in
-  table)    cmd_table ;;
-  export)   cmd_export ;;
-  holders)  cmd_holders ;;
-  history)  shift; cmd_history "${1:-}" ;;
-  pools)    cmd_pools ;;
-  check)    cmd_check ;;
-  brief)    cmd_brief ;;
-  pdf)      shift; cmd_pdf "$@" ;;
-  help|*)   cmd_help ;;
+  table)      cmd_table ;;
+  export)     cmd_export ;;
+  holders)    cmd_holders ;;
+  history)    shift; cmd_history "${1:-}" ;;
+  pools)      cmd_pools ;;
+  check)      cmd_check ;;
+  brief)      cmd_brief ;;
+  grant)      shift; cmd_grant "$@" ;;
+  transfer)   shift; cmd_transfer "$@" ;;
+  add-holder) shift; cmd_add_holder "$1" "$2" ;;
+  add-pool)   shift; cmd_add_pool "$@" ;;
+  pool-add)   shift; cmd_pool_add "$@" ;;
+  push)       shift; cmd_push "$@" ;;
+  pdf)        shift; cmd_pdf "$@" ;;
+  help|*)     cmd_help ;;
 esac

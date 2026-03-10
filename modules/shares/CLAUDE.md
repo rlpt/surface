@@ -16,34 +16,41 @@ Share allocation tracking stored in Dolt. Data lives in the `share_classes`, `ho
 - `cap_table` — full cap table with percentages
 - `class_availability` — issued vs authorised per class
 
-## Workflow: adding a share event
+## Workflow: granting shares
 
-1. Check valid holders: `data sql "SELECT id, display_name FROM holders;"`
-2. Check valid classes: `data sql "SELECT name, authorised FROM share_classes;"`
-3. Insert the event:
-   ```sql
-   INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity)
-     VALUES ('2026-03-09', 'grant', 'alice', 'ordinary', 500);
-   ```
-4. Validate: `shares check`
-5. Commit: `data commit -m "grant 500 ordinary to alice"`
-
-Event types: `grant`, `transfer-in`, `transfer-out`, `cancel`
-
-For vesting:
-```sql
-INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity, vesting_start, vesting_months, vesting_cliff_months)
-  VALUES ('2026-03-09', 'grant', 'alice', 'ordinary', 500, '2026-03-09', 48, 12);
+```bash
+shares add-holder alice "Alice Smith"      # add holder if new
+shares grant alice ordinary 500            # grant + validate + dolt commit
 ```
 
-## Workflow: adding a holder
-
+Or with vesting (use SQL directly):
 ```sql
-INSERT INTO holders (id, display_name) VALUES ('alice', 'Alice Smith');
+data sql "INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity, vesting_start, vesting_months, vesting_cliff_months)
+  VALUES ('2026-03-09', 'grant', 'alice', 'ordinary', 500, '2026-03-09', 48, 12);"
 ```
 
-## Common commands
+## Workflow: transferring shares
 
+```bash
+shares transfer richard alice ordinary 100   # transfer-out + transfer-in pair, auto-committed
+```
+
+## Google Sheets export
+
+Requires two env vars:
+- `GOOGLE_SERVICE_ACCOUNT_KEY` — path to service account JSON key file
+- `SHARES_SHEET_ID` — the spreadsheet ID from the Google Sheets URL
+
+```bash
+shares push all          # push all tabs (Cap Table, History, Holders, Pools)
+shares push table        # push just the cap table
+```
+
+The service account must have Editor access to the spreadsheet.
+
+## Commands
+
+Read:
 - `shares table` — current cap table with percentages
 - `shares export` — CSV output
 - `shares holders` — list all shareholders with totals
@@ -51,6 +58,14 @@ INSERT INTO holders (id, display_name) VALUES ('alice', 'Alice Smith');
 - `shares pools` — pool budgets, usage, and availability
 - `shares check` — validate consistency
 - `shares brief` — compact context dump for agent warm-up
-- `shares pdf table` — cap table as PDF
-- `shares pdf history` — event history as PDF
-- `shares pdf holder <id>` — individual holder statement as PDF
+
+Write:
+- `shares grant <holder> <class> <qty>` — grant shares (validates + commits)
+- `shares transfer <from> <to> <class> <qty>` — transfer shares
+- `shares add-holder <id> "Name"` — add a shareholder
+- `shares add-pool <name> <class> <budget>` — create a pool
+- `shares pool-add <pool> <holder>` — add holder to pool
+
+Export:
+- `shares pdf table|history|holder <id>` — generate PDF
+- `shares push table|history|holders|pools|all` — push to Google Sheets

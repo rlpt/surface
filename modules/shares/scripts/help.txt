@@ -1,10 +1,11 @@
 Shares (cap table management — dolt):
-  shares table                Show cap table with percentages and vesting
-  shares export               Output cap table as CSV
-  shares holders              List all shareholders with totals
-  shares history [holder]     Show share events (optionally filter by holder)
-  shares check                Validate ledger consistency
-  shares brief                Compact context dump for agent warm-up
-  shares pdf table            Cap table as PDF
-  shares pdf history          Share event history as PDF
-  shares pdf holder <id>      Individual holder statement as PDF
+  shares table                              Cap table with percentages
+  shares holders                            List all shareholders
+  shares history [holder]                   Share events (optionally filtered)
+  shares pools                              Pool budgets and usage
+  shares check                              Validate consistency
+  shares grant <holder> <class> <qty>       Grant shares
+  shares transfer <from> <to> <class> <qty> Transfer shares
+  shares add-holder <id> "Name"             Add a shareholder
+  shares push <table|history|holders|pools|all>  Push to Google Sheets
+  shares pdf <table|history|holder <id>>    Generate PDF
