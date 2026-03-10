@@ -47,14 +47,18 @@ cmd_status() {
   echo ""
   echo "Row counts:"
   dsql -q "
-    SELECT 'accounts' AS tbl, COUNT(*) AS rows FROM accounts
+    SELECT 'accounts' AS tbl, COUNT(*) AS cnt FROM accounts
     UNION ALL SELECT 'transactions', COUNT(*) FROM transactions
     UNION ALL SELECT 'postings', COUNT(*) FROM postings
     UNION ALL SELECT 'share_classes', COUNT(*) FROM share_classes
     UNION ALL SELECT 'holders', COUNT(*) FROM holders
     UNION ALL SELECT 'share_events', COUNT(*) FROM share_events
     UNION ALL SELECT 'pools', COUNT(*) FROM pools
-    UNION ALL SELECT 'pool_members', COUNT(*) FROM pool_members;
+    UNION ALL SELECT 'pool_members', COUNT(*) FROM pool_members
+    UNION ALL SELECT 'contacts', COUNT(*) FROM contacts
+    UNION ALL SELECT 'interactions', COUNT(*) FROM interactions
+    UNION ALL SELECT 'deals', COUNT(*) FROM deals
+    UNION ALL SELECT 'tags', COUNT(*) FROM tags;
   "
 }
 

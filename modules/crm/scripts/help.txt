@@ -1,0 +1,10 @@
+CRM (contacts, deals, pipeline — dolt):
+  crm pipeline                               Pipeline overview
+  crm contacts [active]                      List contacts (or active only)
+  crm stale                                  Contacts not contacted in 14+ days
+  crm find <term>                            Search by company/name/tag
+  crm log <contact-id> "summary"             Log an interaction
+  crm history <contact-id>                   Interaction history
+  crm deals [won|lost]                       List deals (open, won, or lost)
+  crm digest                                 Weekly digest
+  crm forecast                               Revenue forecast from pipeline

@@ -74,6 +74,62 @@ CREATE TABLE pool_members (
 );
 
 -- ============================================================
+-- CRM
+-- ============================================================
+
+CREATE TABLE contacts (
+  id VARCHAR(50) PRIMARY KEY,
+  company VARCHAR(200) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  email VARCHAR(200),
+  role VARCHAR(100),
+  source VARCHAR(50),
+  stage VARCHAR(20) NOT NULL DEFAULT 'lead'
+    CHECK (stage IN ('lead', 'prospect', 'customer', 'churned', 'dormant')),
+  notes TEXT,
+  created_at DATE NOT NULL DEFAULT (CURRENT_DATE),
+  last_contacted DATE,
+  next_action_date DATE,
+  next_action TEXT
+);
+
+CREATE TABLE interactions (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  contact_id VARCHAR(50) NOT NULL,
+  interaction_date DATE NOT NULL DEFAULT (CURRENT_DATE),
+  channel VARCHAR(20) NOT NULL
+    CHECK (channel IN ('email', 'call', 'meeting', 'demo', 'slack', 'event', 'other')),
+  direction VARCHAR(10) NOT NULL DEFAULT 'outbound'
+    CHECK (direction IN ('inbound', 'outbound')),
+  summary TEXT NOT NULL,
+  follow_up TEXT,
+  FOREIGN KEY (contact_id) REFERENCES contacts(id),
+  INDEX idx_interaction_date (interaction_date)
+);
+
+CREATE TABLE deals (
+  id VARCHAR(50) PRIMARY KEY,
+  contact_id VARCHAR(50) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  stage VARCHAR(20) NOT NULL DEFAULT 'qualifying'
+    CHECK (stage IN ('qualifying', 'proposal', 'negotiation', 'closed-won', 'closed-lost')),
+  value_gbp DECIMAL(10,2),
+  recurring VARCHAR(10) CHECK (recurring IN ('monthly', 'annual', 'one-off')),
+  opened_date DATE NOT NULL DEFAULT (CURRENT_DATE),
+  closed_date DATE,
+  lost_reason TEXT,
+  notes TEXT,
+  FOREIGN KEY (contact_id) REFERENCES contacts(id)
+);
+
+CREATE TABLE tags (
+  contact_id VARCHAR(50) NOT NULL,
+  tag VARCHAR(50) NOT NULL,
+  PRIMARY KEY (contact_id, tag),
+  FOREIGN KEY (contact_id) REFERENCES contacts(id)
+);
+
+-- ============================================================
 -- Views
 -- ============================================================
 
@@ -120,3 +176,23 @@ FROM share_classes sc
 LEFT JOIN (
   SELECT share_class, SUM(shares_held) AS issued FROM holdings GROUP BY share_class
 ) i ON i.share_class = sc.name;
+
+CREATE VIEW pipeline AS
+SELECT
+  d.stage,
+  COUNT(*) AS deals,
+  SUM(d.value_gbp) AS total_value,
+  GROUP_CONCAT(c.company ORDER BY d.value_gbp DESC) AS companies
+FROM deals d
+JOIN contacts c ON c.id = d.contact_id
+WHERE d.stage NOT IN ('closed-won', 'closed-lost')
+GROUP BY d.stage
+ORDER BY FIELD(d.stage, 'qualifying', 'proposal', 'negotiation');
+
+CREATE VIEW stale_contacts AS
+SELECT
+  id, company, name, stage, last_contacted, next_action, next_action_date
+FROM contacts
+WHERE stage IN ('lead', 'prospect')
+  AND (last_contacted IS NULL OR last_contacted < DATE_SUB(CURRENT_DATE, INTERVAL 14 DAY))
+ORDER BY last_contacted ASC;
