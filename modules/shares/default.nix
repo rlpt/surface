@@ -12,7 +12,9 @@
     ]))
   ];
   scripts = [
-    (pkgs.writeShellScriptBin "shares" (builtins.readFile ./scripts/shares.sh))
+    (pkgs.writeShellScriptBin "shares" ''
+      exec python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" "$@"
+    '')
   ];
   helpText = builtins.readFile ./scripts/help.txt;
 }
