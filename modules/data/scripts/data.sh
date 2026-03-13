@@ -96,39 +96,26 @@ cmd_checkout() {
   (cd "$SURFACE_DB" && dolt checkout "$@")
 }
 
-cmd_remote() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  if [ $# -eq 0 ]; then
-    (cd "$SURFACE_DB" && dolt remote -v)
-  else
-    (cd "$SURFACE_DB" && dolt remote "$@")
-  fi
-}
+REMOTE_PATH="formrunner:/var/lib/surface/dolt/surface-db"
 
-cmd_push() {
+cmd_sync() {
   [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  local remote="${1:-origin}"
-  (cd "$SURFACE_DB" && dolt push "$remote" main)
-  echo "Pushed to $remote"
-}
-
-cmd_pull() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  local remote="${1:-origin}"
-  (cd "$SURFACE_DB" && dolt pull "$remote")
-  echo "Pulled from $remote"
-}
-
-cmd_clone() {
-  local remote_url="$1"
-  if [ -d "$SURFACE_DB/.dolt" ]; then
-    echo "Database already exists at $SURFACE_DB"
-    echo "Use 'data reset' to recreate, or 'data pull' to update."
-    return
-  fi
-  mkdir -p "$(dirname "$SURFACE_DB")"
-  dolt clone "$remote_url" "$SURFACE_DB"
-  echo "Cloned $remote_url to $SURFACE_DB"
+  local direction="${1:-push}"
+  case "$direction" in
+    push)
+      echo "Syncing local → formrunner"
+      rsync -av --delete "$SURFACE_DB/" "$REMOTE_PATH/"
+      echo "Done"
+      ;;
+    pull)
+      echo "Syncing formrunner → local"
+      rsync -av --delete "$REMOTE_PATH/" "$SURFACE_DB/"
+      echo "Done"
+      ;;
+    *)
+      die "usage: data sync [push|pull]"
+      ;;
+  esac
 }
 
 cmd_help() {
@@ -146,10 +133,7 @@ cmd_help() {
   echo "  commit -m 'msg'    Commit current changes"
   echo "  branch [name]      List or create branches"
   echo "  checkout <branch>  Switch branches"
-  echo "  remote [args]      List or manage remotes"
-  echo "  push [remote]      Push to remote (default: origin)"
-  echo "  pull [remote]      Pull from remote (default: origin)"
-  echo "  clone <url>        Clone database from remote"
+  echo "  sync [push|pull]   Sync database with formrunner (default: push)"
   echo "  help               Show this help"
 }
 
@@ -163,9 +147,6 @@ case "${1:-help}" in
   commit)   shift; cmd_commit "$@" ;;
   branch)   shift; cmd_branch "$@" ;;
   checkout) shift; cmd_checkout "$@" ;;
-  remote)   shift; cmd_remote "$@" ;;
-  push)     shift; cmd_push "$@" ;;
-  pull)     shift; cmd_pull "$@" ;;
-  clone)    shift; cmd_clone "$@" ;;
+  sync)     shift; cmd_sync "$@" ;;
   help|*)   cmd_help ;;
 esac

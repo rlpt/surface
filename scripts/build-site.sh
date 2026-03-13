@@ -17,16 +17,15 @@ export BRAND_ACCENT="${BRAND_ACCENT:-#a78bfa}"
 export BRAND_BG="${BRAND_BG:-#0a0a1a}"
 export BRAND_TEXT="${BRAND_TEXT:-#e0e0e0}"
 
-# SURFACE_DOLT_REMOTE: if set, clone live data from dolt remote
+# SURFACE_DOLT_SOURCE: if set, copy live data from this path
 # Otherwise fall back to seed data
 echo "==> Initialising database"
 if [ ! -d "$SURFACE_DB/.dolt" ]; then
-  if [ -n "${SURFACE_DOLT_REMOTE:-}" ]; then
-    echo "    Cloning from $SURFACE_DOLT_REMOTE"
-    mkdir -p "$(dirname "$SURFACE_DB")"
-    dolt clone "$SURFACE_DOLT_REMOTE" "$SURFACE_DB"
+  if [ -n "${SURFACE_DOLT_SOURCE:-}" ] && [ -d "${SURFACE_DOLT_SOURCE}/.dolt" ]; then
+    echo "    Copying from $SURFACE_DOLT_SOURCE"
+    cp -a "$SURFACE_DOLT_SOURCE" "$SURFACE_DB"
   else
-    echo "    No SURFACE_DOLT_REMOTE set — using seed data"
+    echo "    No live data source — using seed data"
     mkdir -p "$SURFACE_DB"
     (
       cd "$SURFACE_DB"
