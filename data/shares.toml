@@ -1,0 +1,91 @@
+[[share_classes]]
+name = "ordinary"
+nominal_value = 0.01
+nominal_currency = "GBP"
+authorised = 10000
+
+[[holders]]
+id = "richard"
+display_name = "Richard Targett"
+
+[[holders]]
+id = "mark"
+display_name = "Mark Holland"
+
+[[holders]]
+id = "emma"
+display_name = "Emma Loxey"
+
+[[share_events]]
+event_date = "2024-06-01"
+event_type = "grant"
+holder_id = "richard"
+share_class = "ordinary"
+quantity = 1000
+
+[[share_events]]
+event_date = "2026-02-13"
+event_type = "transfer-out"
+holder_id = "richard"
+share_class = "ordinary"
+quantity = 10
+
+[[share_events]]
+event_date = "2026-02-13"
+event_type = "transfer-in"
+holder_id = "mark"
+share_class = "ordinary"
+quantity = 10
+
+[[share_events]]
+event_date = "2026-02-13"
+event_type = "transfer-out"
+holder_id = "richard"
+share_class = "ordinary"
+quantity = 69
+
+[[share_events]]
+event_date = "2026-02-13"
+event_type = "transfer-in"
+holder_id = "emma"
+share_class = "ordinary"
+quantity = 69
+
+[[share_events]]
+event_date = "2026-02-13"
+event_type = "grant"
+holder_id = "richard"
+share_class = "ordinary"
+quantity = 7079
+
+[[pools]]
+name = "founder"
+share_class = "ordinary"
+budget = 8000
+
+[[pools]]
+name = "supporter"
+share_class = "ordinary"
+budget = 1000
+
+[[pools]]
+name = "early-supporter"
+share_class = "ordinary"
+budget = 81
+
+[[pools]]
+name = "investment"
+share_class = "ordinary"
+budget = 1000
+
+[[pool_members]]
+pool_name = "founder"
+holder_id = "richard"
+
+[[pool_members]]
+pool_name = "supporter"
+holder_id = "mark"
+
+[[pool_members]]
+pool_name = "supporter"
+holder_id = "emma"

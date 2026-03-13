@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Board meetings, minutes, and resolutions — CLI backed by Dolt."""
+"""Board meetings, minutes, and resolutions — CLI backed by TOML data."""
 
-import csv
 import http.server
-import io
 import os
 import subprocess
 import sys
 from datetime import date
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../data/scripts"))
+import datalib
+
 SURFACE_ROOT = os.environ.get("SURFACE_ROOT", ".")
-SURFACE_DB = os.environ.get("SURFACE_DB", os.path.join(SURFACE_ROOT, ".surface-db"))
 DOWNLOADS_DIR = os.path.join(SURFACE_ROOT, "downloads")
 
 COLORS = {
@@ -26,96 +26,52 @@ def die(msg):
     sys.exit(1)
 
 
-def check_db():
-    if not os.path.isdir(os.path.join(SURFACE_DB, ".dolt")):
-        die("database not initialised — run 'data init'")
-
-
-def dsql(query):
-    check_db()
-    subprocess.run(
-        ["dolt", "sql", "-q", query],
-        cwd=SURFACE_DB,
-        check=True,
-    )
-
-
-def dsql_csv(query):
-    check_db()
-    r = subprocess.run(
-        ["dolt", "sql", "-r", "csv", "-q", query],
-        cwd=SURFACE_DB,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    lines = r.stdout.strip().split("\n")
-    return lines[1:] if len(lines) > 1 else []
-
-
-def dsql_rows(query):
-    """Run a Dolt SQL query and return list of dicts."""
-    check_db()
-    r = subprocess.run(
-        ["dolt", "sql", "-r", "csv", "-q", query],
-        cwd=SURFACE_DB,
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0:
-        return []
-    reader = csv.DictReader(io.StringIO(r.stdout))
-    return list(reader)
-
-
-def dsql_val(query):
-    rows = dsql_rows(query)
-    if not rows:
-        return ""
-    return list(rows[0].values())[0]
-
-
-def dolt_commit(msg):
-    check_db()
-    subprocess.run(["dolt", "add", "."], cwd=SURFACE_DB, check=True)
-    subprocess.run(["dolt", "commit", "-m", msg], cwd=SURFACE_DB, check=True)
-
-
 # ---------------------------------------------------------------------------
 # CLI commands — read
 # ---------------------------------------------------------------------------
 
 def cmd_meetings():
-    rows = dsql_csv(
-        "SELECT m.id, m.meeting_date, m.title, m.status, "
-        "COUNT(DISTINCT a.person_name) AS attendees, "
-        "COUNT(DISTINCT r.id) AS resolutions "
-        "FROM board_meetings m "
-        "LEFT JOIN board_attendees a ON a.meeting_id = m.id "
-        "LEFT JOIN board_resolutions r ON r.meeting_id = m.id "
-        "GROUP BY m.id, m.meeting_date, m.title, m.status "
-        "ORDER BY m.meeting_date DESC"
-    )
-    if not rows:
+    data = datalib.load("board")
+    meetings = data.get("board_meetings", [])
+    attendees = data.get("board_attendees", [])
+    resolutions = data.get("board_resolutions", [])
+
+    if not meetings:
         print("No meetings found.")
         return
+
+    # Count attendees and resolutions per meeting
+    att_counts = {}
+    for a in attendees:
+        mid = a["meeting_id"]
+        att_counts[mid] = att_counts.get(mid, 0) + 1
+
+    res_counts = {}
+    for r in resolutions:
+        mid = r["meeting_id"]
+        res_counts[mid] = res_counts.get(mid, 0) + 1
+
+    # Sort by meeting_date descending
+    sorted_meetings = sorted(meetings, key=lambda m: m.get("meeting_date", ""), reverse=True)
+
     print(f"{'ID':<12} {'Date':<12} {'Status':<10} {'Attend':>6} {'Resol':>5}  Title")
     print("-" * 78)
-    for row in rows:
-        parts = row.split(",")
-        if len(parts) >= 6:
-            mid, mdate, title, status, att, res = parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
-            print(f"{mid:<12} {mdate:<12} {status:<10} {att:>6} {res:>5}  {title}")
+    for m in sorted_meetings:
+        mid = m["id"]
+        mdate = m.get("meeting_date", "")
+        title = m.get("title", "")
+        status = m.get("status", "")
+        att = att_counts.get(mid, 0)
+        res = res_counts.get(mid, 0)
+        print(f"{mid:<12} {mdate:<12} {status:<10} {att:>6} {res:>5}  {title}")
 
 
 def cmd_meeting(meeting_id):
-    info = dsql_rows(
-        f"SELECT id, meeting_date, title, location, status, called_by "
-        f"FROM board_meetings WHERE id = '{meeting_id}'"
-    )
-    if not info:
+    data = datalib.load("board")
+    meetings = [m for m in data.get("board_meetings", []) if m["id"] == meeting_id]
+    if not meetings:
         die(f"meeting '{meeting_id}' not found")
-    m = info[0]
+    m = meetings[0]
     print(f"Meeting: {m['title']}")
     print(f"Date:    {m['meeting_date']}")
     print(f"Status:  {m['status']}")
@@ -124,9 +80,9 @@ def cmd_meeting(meeting_id):
     if m.get("called_by"):
         print(f"Called by: {m['called_by']}")
 
-    attendees = dsql_rows(
-        f"SELECT person_name, role FROM board_attendees "
-        f"WHERE meeting_id = '{meeting_id}' ORDER BY role, person_name"
+    attendees = sorted(
+        [a for a in data.get("board_attendees", []) if a["meeting_id"] == meeting_id],
+        key=lambda a: (a.get("role", ""), a.get("person_name", ""))
     )
     if attendees:
         print(f"\nAttendees:")
@@ -134,18 +90,18 @@ def cmd_meeting(meeting_id):
             role_str = f" ({a['role']})" if a.get("role") else ""
             print(f"  - {a['person_name']}{role_str}")
 
-    minutes = dsql_rows(
-        f"SELECT seq, item_text FROM board_minutes "
-        f"WHERE meeting_id = '{meeting_id}' ORDER BY seq"
+    minutes = sorted(
+        [mi for mi in data.get("board_minutes", []) if mi["meeting_id"] == meeting_id],
+        key=lambda mi: mi.get("seq", 0)
     )
     if minutes:
         print(f"\nMinutes:")
         for mi in minutes:
             print(f"  {mi['seq']}. {mi['item_text']}")
 
-    resolutions = dsql_rows(
-        f"SELECT id, resolution_text, status, proposed_by, voted_date "
-        f"FROM board_resolutions WHERE meeting_id = '{meeting_id}' ORDER BY id"
+    resolutions = sorted(
+        [r for r in data.get("board_resolutions", []) if r["meeting_id"] == meeting_id],
+        key=lambda r: r.get("id", "")
     )
     if resolutions:
         print(f"\nResolutions:")
@@ -156,41 +112,46 @@ def cmd_meeting(meeting_id):
 
 
 def cmd_resolutions(filter_status):
-    where = ""
-    if filter_status == "pending":
-        where = "WHERE r.status = 'pending'"
-    elif filter_status == "passed":
-        where = "WHERE r.status = 'passed'"
+    data = datalib.load("board")
+    meetings_map = {m["id"]: m for m in data.get("board_meetings", [])}
+    resolutions = data.get("board_resolutions", [])
 
-    rows = dsql_rows(
-        f"SELECT r.id, m.meeting_date, r.resolution_text, r.status, r.proposed_by, r.voted_date "
-        f"FROM board_resolutions r "
-        f"JOIN board_meetings m ON m.id = r.meeting_id "
-        f"{where} ORDER BY m.meeting_date DESC, r.id"
+    if filter_status == "pending":
+        resolutions = [r for r in resolutions if r.get("status") == "pending"]
+    elif filter_status == "passed":
+        resolutions = [r for r in resolutions if r.get("status") == "passed"]
+
+    # Sort by meeting_date desc, then resolution id
+    resolutions = sorted(
+        resolutions,
+        key=lambda r: (meetings_map.get(r["meeting_id"], {}).get("meeting_date", ""), r.get("id", "")),
+        reverse=True,
     )
-    if not rows:
+
+    if not resolutions:
         print("No resolutions found.")
         return
     print(f"{'ID':<12} {'Date':<12} {'Status':<10} Resolution")
     print("-" * 78)
-    for r in rows:
+    for r in resolutions:
+        meeting = meetings_map.get(r["meeting_id"], {})
+        mdate = meeting.get("meeting_date", "")
         text = r["resolution_text"][:50] + ("..." if len(r["resolution_text"]) > 50 else "")
-        print(f"{r['id']:<12} {r['meeting_date']:<12} {r['status']:<10} {text}")
+        print(f"{r['id']:<12} {mdate:<12} {r['status']:<10} {text}")
 
 
 def cmd_minutes(meeting_id):
-    info = dsql_rows(
-        f"SELECT title, meeting_date FROM board_meetings WHERE id = '{meeting_id}'"
-    )
-    if not info:
+    data = datalib.load("board")
+    meetings = [m for m in data.get("board_meetings", []) if m["id"] == meeting_id]
+    if not meetings:
         die(f"meeting '{meeting_id}' not found")
-    m = info[0]
+    m = meetings[0]
     print(f"Minutes — {m['title']} ({m['meeting_date']})")
     print("=" * 60)
 
-    minutes = dsql_rows(
-        f"SELECT seq, item_text FROM board_minutes "
-        f"WHERE meeting_id = '{meeting_id}' ORDER BY seq"
+    minutes = sorted(
+        [mi for mi in data.get("board_minutes", []) if mi["meeting_id"] == meeting_id],
+        key=lambda mi: mi.get("seq", 0)
     )
     if not minutes:
         print("No minutes recorded.")
@@ -208,13 +169,26 @@ def cmd_new(args):
         die("usage: board new <date> <title>")
     meeting_date = args[0]
     title = " ".join(args[1:])
-    # generate id from date
     mid = f"bm-{meeting_date}"
-    dsql(
-        f"INSERT INTO board_meetings (id, meeting_date, title, status) "
-        f"VALUES ('{mid}', '{meeting_date}', '{title}', 'scheduled')"
-    )
-    dolt_commit(f"board: schedule meeting {mid} — {title}")
+
+    data = datalib.load("board")
+    if "board_meetings" not in data:
+        data["board_meetings"] = []
+    if "board_attendees" not in data:
+        data["board_attendees"] = []
+    if "board_minutes" not in data:
+        data["board_minutes"] = []
+    if "board_resolutions" not in data:
+        data["board_resolutions"] = []
+
+    data["board_meetings"].append({
+        "id": mid,
+        "meeting_date": meeting_date,
+        "title": title,
+        "status": "scheduled",
+    })
+    datalib.save("board", data)
+    datalib.git_commit(f"board: schedule meeting {mid} — {title}")
     print(f"Created meeting: {mid}")
 
 
@@ -224,11 +198,17 @@ def cmd_attend(args):
     meeting_id = args[0]
     person = args[1]
     role = args[2] if len(args) > 2 else "director"
-    dsql(
-        f"INSERT INTO board_attendees (meeting_id, person_name, role) "
-        f"VALUES ('{meeting_id}', '{person}', '{role}')"
-    )
-    dolt_commit(f"board: {person} attending {meeting_id} as {role}")
+
+    data = datalib.load("board")
+    if "board_attendees" not in data:
+        data["board_attendees"] = []
+    data["board_attendees"].append({
+        "meeting_id": meeting_id,
+        "person_name": person,
+        "role": role,
+    })
+    datalib.save("board", data)
+    datalib.git_commit(f"board: {person} attending {meeting_id} as {role}")
     print(f"Added {person} ({role}) to {meeting_id}")
 
 
@@ -236,15 +216,19 @@ def cmd_minute(args):
     if len(args) < 3:
         die("usage: board minute <meeting-id> <seq> \"text\"")
     meeting_id = args[0]
-    seq = args[1]
+    seq = int(args[1])
     text = " ".join(args[2:])
-    # escape single quotes for SQL
-    text_escaped = text.replace("'", "''")
-    dsql(
-        f"INSERT INTO board_minutes (meeting_id, seq, item_text) "
-        f"VALUES ('{meeting_id}', {seq}, '{text_escaped}')"
-    )
-    dolt_commit(f"board: minute {seq} for {meeting_id}")
+
+    data = datalib.load("board")
+    if "board_minutes" not in data:
+        data["board_minutes"] = []
+    data["board_minutes"].append({
+        "meeting_id": meeting_id,
+        "seq": seq,
+        "item_text": text,
+    })
+    datalib.save("board", data)
+    datalib.git_commit(f"board: minute {seq} for {meeting_id}")
     print(f"Added minute item {seq}")
 
 
@@ -253,16 +237,22 @@ def cmd_resolve(args):
         die("usage: board resolve <meeting-id> \"resolution text\"")
     meeting_id = args[0]
     text = " ".join(args[1:])
-    text_escaped = text.replace("'", "''")
-    # auto-generate resolution id
-    count = dsql_val(f"SELECT COUNT(*) FROM board_resolutions WHERE meeting_id = '{meeting_id}'")
-    seq = int(count) + 1 if count else 1
+
+    data = datalib.load("board")
+    if "board_resolutions" not in data:
+        data["board_resolutions"] = []
+    count = len([r for r in data["board_resolutions"] if r["meeting_id"] == meeting_id])
+    seq = count + 1
     rid = f"{meeting_id}-r{seq}"
-    dsql(
-        f"INSERT INTO board_resolutions (id, meeting_id, resolution_text, status) "
-        f"VALUES ('{rid}', '{meeting_id}', '{text_escaped}', 'pending')"
-    )
-    dolt_commit(f"board: propose resolution {rid}")
+
+    data["board_resolutions"].append({
+        "id": rid,
+        "meeting_id": meeting_id,
+        "resolution_text": text,
+        "status": "pending",
+    })
+    datalib.save("board", data)
+    datalib.git_commit(f"board: propose resolution {rid}")
     print(f"Proposed resolution: {rid}")
 
 
@@ -273,11 +263,20 @@ def cmd_vote(args):
     outcome = args[1]
     if outcome not in ("passed", "failed"):
         die("outcome must be 'passed' or 'failed'")
-    dsql(
-        f"UPDATE board_resolutions SET status = '{outcome}', "
-        f"voted_date = CURRENT_DATE WHERE id = '{rid}'"
-    )
-    dolt_commit(f"board: resolution {rid} {outcome}")
+
+    data = datalib.load("board")
+    found = False
+    for r in data.get("board_resolutions", []):
+        if r["id"] == rid:
+            r["status"] = outcome
+            r["voted_date"] = date.today().isoformat()
+            found = True
+            break
+    if not found:
+        die(f"resolution '{rid}' not found")
+
+    datalib.save("board", data)
+    datalib.git_commit(f"board: resolution {rid} {outcome}")
     print(f"Resolution {rid}: {outcome}")
 
 
@@ -485,15 +484,20 @@ footer {{
 <h1>{esc(title)}</h1>
 {body}
 </main>
-<footer>Generated {date.today().isoformat()} from Dolt</footer>
+<footer>Generated {date.today().isoformat()} from data/</footer>
 </body>
 </html>"""
 
 
 def build_meetings_page():
-    total = dsql_val("SELECT COUNT(*) FROM board_meetings")
-    passed = dsql_val("SELECT COUNT(*) FROM board_resolutions WHERE status = 'passed'")
-    pending = dsql_val("SELECT COUNT(*) FROM board_resolutions WHERE status = 'pending'")
+    data = datalib.load("board")
+    meetings = data.get("board_meetings", [])
+    attendees = data.get("board_attendees", [])
+    resolutions = data.get("board_resolutions", [])
+
+    total = len(meetings)
+    passed = len([r for r in resolutions if r.get("status") == "passed"])
+    pending = len([r for r in resolutions if r.get("status") == "pending"])
 
     cards = f"""
 <p class="subtitle">Board governance — meetings, minutes, and resolutions</p>
@@ -504,35 +508,32 @@ def build_meetings_page():
 </div>
 """
 
-    meetings = dsql_rows(
-        "SELECT m.id, m.meeting_date, m.title, m.status, m.location, m.called_by "
-        "FROM board_meetings m ORDER BY m.meeting_date DESC"
-    )
+    sorted_meetings = sorted(meetings, key=lambda m: m.get("meeting_date", ""), reverse=True)
 
     body = cards
-    for m in meetings:
+    for m in sorted_meetings:
         mid = m["id"]
         body += f'<h2><a href="{esc(mid)}.html" style="color: var(--accent); text-decoration: none;">'
         body += f'{esc(m["meeting_date"])} — {esc(m["title"])}</a></h2>\n'
 
-        attendees = dsql_rows(
-            f"SELECT person_name, role FROM board_attendees "
-            f"WHERE meeting_id = '{mid}' ORDER BY role, person_name"
+        meeting_attendees = sorted(
+            [a for a in attendees if a["meeting_id"] == mid],
+            key=lambda a: (a.get("role", ""), a.get("person_name", ""))
         )
-        if attendees:
+        if meeting_attendees:
             body += "<p><strong>Attendees:</strong> "
             body += ", ".join(
                 f'{esc(a["person_name"])} ({esc(a["role"])})'
-                for a in attendees
+                for a in meeting_attendees
             )
             body += "</p>\n"
 
-        resolutions = dsql_rows(
-            f"SELECT id, resolution_text, status FROM board_resolutions "
-            f"WHERE meeting_id = '{mid}' ORDER BY id"
+        meeting_resolutions = sorted(
+            [r for r in resolutions if r["meeting_id"] == mid],
+            key=lambda r: r.get("id", "")
         )
-        if resolutions:
-            for r in resolutions:
+        if meeting_resolutions:
+            for r in meeting_resolutions:
                 status_cls = f"status-{r['status']}"
                 body += f'<div class="resolution-box">'
                 body += f'<span class="res-id">{esc(r["id"])}</span> '
@@ -543,30 +544,28 @@ def build_meetings_page():
 
 
 def build_meeting_detail(meeting_id):
-    info = dsql_rows(
-        f"SELECT id, meeting_date, title, location, status, called_by "
-        f"FROM board_meetings WHERE id = '{meeting_id}'"
-    )
-    if not info:
+    data = datalib.load("board")
+    meetings = [m for m in data.get("board_meetings", []) if m["id"] == meeting_id]
+    if not meetings:
         return None
-    m = info[0]
+    m = meetings[0]
 
     body = f'<p class="subtitle">{esc(m["meeting_date"])} — {esc(m["status"])}'
     if m.get("location"):
         body += f' — {esc(m["location"])}'
     body += "</p>\n"
 
-    attendees = dsql_rows(
-        f"SELECT person_name, role FROM board_attendees "
-        f"WHERE meeting_id = '{meeting_id}' ORDER BY role, person_name"
+    meeting_attendees = sorted(
+        [a for a in data.get("board_attendees", []) if a["meeting_id"] == meeting_id],
+        key=lambda a: (a.get("role", ""), a.get("person_name", ""))
     )
-    if attendees:
+    if meeting_attendees:
         body += "<h2>Attendees</h2>\n"
-        body += html_table(attendees)
+        body += html_table(meeting_attendees)
 
-    minutes = dsql_rows(
-        f"SELECT seq, item_text FROM board_minutes "
-        f"WHERE meeting_id = '{meeting_id}' ORDER BY seq"
+    minutes = sorted(
+        [mi for mi in data.get("board_minutes", []) if mi["meeting_id"] == meeting_id],
+        key=lambda mi: mi.get("seq", 0)
     )
     if minutes:
         body += "<h2>Minutes</h2>\n"
@@ -574,13 +573,13 @@ def build_meeting_detail(meeting_id):
             body += f'<div class="minute-item"><span class="seq">{esc(mi["seq"])}.</span> '
             body += f'{esc(mi["item_text"])}</div>\n'
 
-    resolutions = dsql_rows(
-        f"SELECT id, resolution_text, status, proposed_by, voted_date "
-        f"FROM board_resolutions WHERE meeting_id = '{meeting_id}' ORDER BY id"
+    meeting_resolutions = sorted(
+        [r for r in data.get("board_resolutions", []) if r["meeting_id"] == meeting_id],
+        key=lambda r: r.get("id", "")
     )
-    if resolutions:
+    if meeting_resolutions:
         body += "<h2>Resolutions</h2>\n"
-        for r in resolutions:
+        for r in meeting_resolutions:
             status_cls = f"status-{r['status']}"
             body += f'<div class="resolution-box">'
             body += f'<span class="res-id">{esc(r["id"])}</span> '
@@ -596,23 +595,28 @@ def build_meeting_detail(meeting_id):
 
 
 def build_resolutions_page():
-    rows = dsql_rows(
-        "SELECT r.id, m.meeting_date, m.title AS meeting, "
-        "r.resolution_text, r.status, r.proposed_by, r.voted_date "
-        "FROM board_resolutions r "
-        "JOIN board_meetings m ON m.id = r.meeting_id "
-        "ORDER BY m.meeting_date DESC, r.id"
+    data = datalib.load("board")
+    meetings_map = {m["id"]: m for m in data.get("board_meetings", [])}
+    resolutions = data.get("board_resolutions", [])
+
+    # Sort by meeting_date desc, then resolution id
+    resolutions = sorted(
+        resolutions,
+        key=lambda r: (meetings_map.get(r["meeting_id"], {}).get("meeting_date", ""), r.get("id", "")),
+        reverse=True,
     )
 
     body = '<p class="subtitle">All board resolutions — passed, pending, and failed</p>\n'
 
-    if not rows:
+    if not resolutions:
         body += '<p class="empty">No resolutions recorded.</p>'
     else:
-        for r in rows:
+        for r in resolutions:
+            meeting = meetings_map.get(r["meeting_id"], {})
+            mdate = meeting.get("meeting_date", "")
             status_cls = f"status-{r['status']}"
             body += f'<div class="resolution-box">'
-            body += f'<span class="res-id">{esc(r["id"])} — {esc(r["meeting_date"])}</span><br>'
+            body += f'<span class="res-id">{esc(r["id"])} — {esc(mdate)}</span><br>'
             body += f'<span class="{status_cls}">[{esc(r["status"].upper())}]</span> '
             body += f'{esc(r["resolution_text"])}'
             if r.get("proposed_by"):
@@ -639,7 +643,12 @@ def cmd_html(args):
     print("  resolutions.html")
 
     # individual meeting pages
-    meetings = dsql_rows("SELECT id FROM board_meetings ORDER BY meeting_date DESC")
+    data = datalib.load("board")
+    meetings = sorted(
+        data.get("board_meetings", []),
+        key=lambda m: m.get("meeting_date", ""),
+        reverse=True,
+    )
     for m in meetings:
         mid = m["id"]
         detail = build_meeting_detail(mid)
@@ -691,13 +700,11 @@ def generate_pdf(output_file, markdown):
 
 def meeting_markdown(meeting_id):
     """Build markdown for a single meeting."""
-    info = dsql_rows(
-        f"SELECT id, meeting_date, title, location, status, called_by "
-        f"FROM board_meetings WHERE id = '{meeting_id}'"
-    )
-    if not info:
+    data = datalib.load("board")
+    meetings = [m for m in data.get("board_meetings", []) if m["id"] == meeting_id]
+    if not meetings:
         return None
-    m = info[0]
+    m = meetings[0]
 
     lines = [f"# {m['title']}\n"]
     lines.append(f"**Date:** {m['meeting_date']}")
@@ -708,9 +715,9 @@ def meeting_markdown(meeting_id):
         lines.append(f"**Called by:** {m['called_by']}")
     lines.append("")
 
-    attendees = dsql_rows(
-        f"SELECT person_name, role FROM board_attendees "
-        f"WHERE meeting_id = '{meeting_id}' ORDER BY role, person_name"
+    attendees = sorted(
+        [a for a in data.get("board_attendees", []) if a["meeting_id"] == meeting_id],
+        key=lambda a: (a.get("role", ""), a.get("person_name", ""))
     )
     if attendees:
         lines.append("## Attendees\n")
@@ -720,18 +727,18 @@ def meeting_markdown(meeting_id):
             lines.append(f"| {a['person_name']} | {a.get('role', '')} |")
         lines.append("")
 
-    minutes = dsql_rows(
-        f"SELECT seq, item_text FROM board_minutes "
-        f"WHERE meeting_id = '{meeting_id}' ORDER BY seq"
+    minutes = sorted(
+        [mi for mi in data.get("board_minutes", []) if mi["meeting_id"] == meeting_id],
+        key=lambda mi: mi.get("seq", 0)
     )
     if minutes:
         lines.append("## Minutes\n")
         for mi in minutes:
             lines.append(f"{mi['seq']}. {mi['item_text']}\n")
 
-    resolutions = dsql_rows(
-        f"SELECT id, resolution_text, status, proposed_by, voted_date "
-        f"FROM board_resolutions WHERE meeting_id = '{meeting_id}' ORDER BY id"
+    resolutions = sorted(
+        [r for r in data.get("board_resolutions", []) if r["meeting_id"] == meeting_id],
+        key=lambda r: r.get("id", "")
     )
     if resolutions:
         lines.append("## Resolutions\n")
@@ -764,23 +771,25 @@ def cmd_pdf_resolutions():
     today = date.today().isoformat()
     output = os.path.join(DOWNLOADS_DIR, f"board-resolutions-{today}.pdf")
 
-    rows = dsql_rows(
-        "SELECT r.id, m.meeting_date, r.resolution_text, r.status, "
-        "r.proposed_by, r.voted_date "
-        "FROM board_resolutions r "
-        "JOIN board_meetings m ON m.id = r.meeting_id "
-        "ORDER BY m.meeting_date DESC, r.id"
+    data = datalib.load("board")
+    meetings_map = {m["id"]: m for m in data.get("board_meetings", [])}
+    resolutions = sorted(
+        data.get("board_resolutions", []),
+        key=lambda r: (meetings_map.get(r["meeting_id"], {}).get("meeting_date", ""), r.get("id", "")),
+        reverse=True,
     )
 
     lines = [f"# Board Resolutions\n", f"Generated: {today}\n"]
-    if not rows:
+    if not resolutions:
         lines.append("No resolutions recorded.")
     else:
         lines.append("| ID | Date | Resolution | Status | Proposed by | Voted |")
         lines.append("|----|------|------------|--------|-------------|-------|")
-        for r in rows:
+        for r in resolutions:
+            meeting = meetings_map.get(r["meeting_id"], {})
+            mdate = meeting.get("meeting_date", "")
             lines.append(
-                f"| {r['id']} | {r['meeting_date']} "
+                f"| {r['id']} | {mdate} "
                 f"| {r['resolution_text']} | {r['status'].upper()} "
                 f"| {r.get('proposed_by', '')} "
                 f"| {r.get('voted_date', '')} |"
@@ -793,16 +802,19 @@ def cmd_pdf_pack():
     today = date.today().isoformat()
     output = os.path.join(DOWNLOADS_DIR, f"board-pack-{today}.pdf")
 
-    meetings = dsql_rows(
-        "SELECT id FROM board_meetings ORDER BY meeting_date DESC"
+    data = datalib.load("board")
+    meetings = sorted(
+        data.get("board_meetings", []),
+        key=lambda m: m.get("meeting_date", ""),
+        reverse=True,
     )
+    resolutions = data.get("board_resolutions", [])
+
+    total = len(meetings)
+    passed = len([r for r in resolutions if r.get("status") == "passed"])
+    pending = len([r for r in resolutions if r.get("status") == "pending"])
 
     sections = [f"# Board Pack\n", f"Generated: {today}\n"]
-
-    # Summary
-    total = dsql_val("SELECT COUNT(*) FROM board_meetings")
-    passed = dsql_val("SELECT COUNT(*) FROM board_resolutions WHERE status = 'passed'")
-    pending = dsql_val("SELECT COUNT(*) FROM board_resolutions WHERE status = 'pending'")
     sections.append(f"**Meetings:** {total} | **Resolutions passed:** {passed} | **Pending:** {pending}\n")
     sections.append("---\n")
 

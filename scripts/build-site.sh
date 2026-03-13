@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build all HTML and PDF output from seed data into a single site directory.
+# Build all HTML and PDF output from data/ into a single site directory.
 # Usage: build-site.sh [output-dir]
 #   output-dir defaults to ./site
 
@@ -9,48 +9,12 @@ SURFACE_ROOT="${SURFACE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SITE_DIR="${1:-$SURFACE_ROOT/site}"
 
 export SURFACE_ROOT
-export SURFACE_DB="$SURFACE_ROOT/.surface-db"
 
 # Brand defaults (modules/brand sets these in the shell, replicate here)
 export BRAND_PRIMARY="${BRAND_PRIMARY:-#6366f1}"
 export BRAND_ACCENT="${BRAND_ACCENT:-#a78bfa}"
 export BRAND_BG="${BRAND_BG:-#0a0a1a}"
 export BRAND_TEXT="${BRAND_TEXT:-#e0e0e0}"
-
-# SURFACE_DOLT_REMOTE: clone live data from the remotesapi endpoint
-# Falls back to seed data if unset or clone fails
-echo "==> Initialising database"
-if [ ! -d "$SURFACE_DB/.dolt" ]; then
-  if [ -n "${SURFACE_DOLT_REMOTE:-}" ]; then
-    echo "    Cloning from $SURFACE_DOLT_REMOTE"
-    if dolt clone "$SURFACE_DOLT_REMOTE" "$SURFACE_DB"; then
-      echo "    Cloned successfully"
-    else
-      echo "    Clone failed — falling back to seed data"
-      rm -rf "$SURFACE_DB"
-      mkdir -p "$SURFACE_DB"
-      (
-        cd "$SURFACE_DB"
-        dolt init --name "surface" --email "system@formabi.com"
-        dolt sql < "$SURFACE_ROOT/modules/data/schema.sql"
-        dolt sql < "$SURFACE_ROOT/modules/data/seed.sql"
-        dolt add .
-        dolt commit -m "init: schema and seed data"
-      )
-    fi
-  else
-    echo "    No remote configured — using seed data"
-    mkdir -p "$SURFACE_DB"
-    (
-      cd "$SURFACE_DB"
-      dolt init --name "surface" --email "system@formabi.com"
-      dolt sql < "$SURFACE_ROOT/modules/data/schema.sql"
-      dolt sql < "$SURFACE_ROOT/modules/data/seed.sql"
-      dolt add .
-      dolt commit -m "init: schema and seed data"
-    )
-  fi
-fi
 
 echo "==> Building dashboard HTML"
 python3 "$SURFACE_ROOT/modules/dashboard/scripts/dashboard.py" build "$SITE_DIR/dashboard"
@@ -65,7 +29,12 @@ mkdir -p "$SURFACE_ROOT/downloads"
 python3 "$SURFACE_ROOT/modules/board/scripts/board.py" pdf pack || echo "    (no board data for PDF)"
 
 # Contract PDFs — generate for all contracts
-CONTRACTS=$(cd "$SURFACE_DB" && dolt sql -r csv -q "SELECT id FROM contracts;" 2>/dev/null | tail -n +2) || true
+CONTRACTS=$(SURFACE_ROOT="$SURFACE_ROOT" python3 -c "
+import sys; sys.path.insert(0, '$SURFACE_ROOT/modules/data/scripts')
+import datalib
+for ct in datalib.load('crm').get('contracts', []):
+    print(ct['id'])
+" 2>/dev/null) || true
 for ct in $CONTRACTS; do
   python3 "$SURFACE_ROOT/modules/crm/scripts/crm.py" pdf "$ct" || echo "    (skipped $ct)"
 done

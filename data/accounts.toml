@@ -1,0 +1,84 @@
+[[accounts]]
+path = "assets:bank:tide"
+account_type = "assets"
+
+[[accounts]]
+path = "assets:bank:savings"
+account_type = "assets"
+
+[[accounts]]
+path = "liabilities:cc:business"
+account_type = "liabilities"
+
+[[accounts]]
+path = "liabilities:tax:vat"
+account_type = "liabilities"
+
+[[accounts]]
+path = "liabilities:tax:corp"
+account_type = "liabilities"
+
+[[accounts]]
+path = "expenses:infra:hosting"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:infra:cloud"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:infra:domains"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:tools:design"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:tools:dev"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:admin:compliance"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:admin:insurance"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:travel"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:payroll:salary"
+account_type = "expenses"
+
+[[accounts]]
+path = "expenses:payroll:pension"
+account_type = "expenses"
+
+[[accounts]]
+path = "revenue:sales"
+account_type = "revenue"
+
+[[accounts]]
+path = "revenue:consulting"
+account_type = "revenue"
+
+[[accounts]]
+path = "equity:opening-balances"
+account_type = "equity"
+
+# transactions and postings are arrays of tables
+# [[transactions]]
+# id = 1
+# txn_date = "2026-03-09"
+# payee = "AWS"
+# description = "Monthly hosting"
+#
+# [[postings]]
+# txn_id = 1
+# account_path = "expenses:infra:hosting"
+# amount = 45.00
+# currency = "GBP"

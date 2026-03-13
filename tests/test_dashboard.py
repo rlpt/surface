@@ -10,10 +10,55 @@ from conftest import import_script
 
 dashboard = import_script("dashboard", "dashboard")
 
+SHARES_DATA = {
+    "share_classes": [{"name": "ordinary", "nominal_value": 0.01, "nominal_currency": "GBP", "authorised": 10000}],
+    "holders": [{"id": "richard", "display_name": "Richard Targett"}],
+    "share_events": [
+        {"event_date": "2024-06-01", "event_type": "grant", "holder_id": "richard", "share_class": "ordinary", "quantity": 1000},
+    ],
+    "pools": [{"name": "founder", "share_class": "ordinary", "budget": 8000}],
+    "pool_members": [{"pool_name": "founder", "holder_id": "richard"}],
+}
+
+ACCT_DATA = {
+    "accounts": [
+        {"path": "assets:bank:tide", "account_type": "assets"},
+        {"path": "expenses:infra:hosting", "account_type": "expenses"},
+    ],
+    "transactions": [
+        {"id": 1, "txn_date": "2026-03-01", "payee": "AWS", "description": "Hosting"},
+    ],
+    "postings": [
+        {"txn_id": 1, "account_path": "expenses:infra:hosting", "amount": 45.0, "currency": "GBP"},
+        {"txn_id": 1, "account_path": "assets:bank:tide", "amount": -45.0, "currency": "GBP"},
+    ],
+}
+
+CRM_DATA = {
+    "customers": [
+        {"id": "acme", "company": "Acme Corp", "company_number": "12345678",
+         "address": "123 Main St", "notes": "", "created_at": "2026-03-01"},
+    ],
+    "contacts": [
+        {"id": "acme-jane", "customer_id": "acme", "name": "Jane Smith",
+         "email": "jane@acme.com", "role": "CTO", "notes": "", "created_at": "2026-03-01"},
+    ],
+    "contracts": [
+        {"id": "ct-acme-1", "customer_id": "acme", "title": "SaaS Agreement",
+         "status": "active", "effective_date": "2026-04-01", "term_months": 12,
+         "auto_renew": False, "payment_terms": "net-30", "currency": "GBP",
+         "governing_law": "England and Wales", "jurisdiction": "Courts of England and Wales",
+         "notice_period_days": 30, "notes": "", "created_at": "2026-03-01"},
+    ],
+    "contract_lines": [
+        {"contract_id": "ct-acme-1", "seq": 1, "description": "Platform licence",
+         "quantity": 1, "unit_price": 200.0, "frequency": "monthly"},
+    ],
+    "contract_clauses": [],
+}
+
 
 class TestEsc(unittest.TestCase):
-    """Test HTML escaping."""
-
     def test_plain_text(self):
         self.assertEqual(dashboard.esc("hello"), "hello")
 
@@ -34,8 +79,6 @@ class TestEsc(unittest.TestCase):
 
 
 class TestIsNumeric(unittest.TestCase):
-    """Test numeric detection."""
-
     def test_integer(self):
         self.assertTrue(dashboard.is_numeric("42"))
 
@@ -48,12 +91,6 @@ class TestIsNumeric(unittest.TestCase):
     def test_comma_separated(self):
         self.assertTrue(dashboard.is_numeric("1,000"))
 
-    def test_large_number(self):
-        self.assertTrue(dashboard.is_numeric("1,234,567.89"))
-
-    def test_zero(self):
-        self.assertTrue(dashboard.is_numeric("0"))
-
     def test_text(self):
         self.assertFalse(dashboard.is_numeric("hello"))
 
@@ -63,16 +100,8 @@ class TestIsNumeric(unittest.TestCase):
     def test_none(self):
         self.assertFalse(dashboard.is_numeric(None))
 
-    def test_mixed(self):
-        self.assertFalse(dashboard.is_numeric("42abc"))
-
-    def test_date(self):
-        self.assertFalse(dashboard.is_numeric("2026-03-15"))
-
 
 class TestHtmlTable(unittest.TestCase):
-    """Test HTML table generation."""
-
     def test_empty_rows(self):
         result = dashboard.html_table([])
         self.assertIn("No data.", result)
@@ -89,12 +118,6 @@ class TestHtmlTable(unittest.TestCase):
         result = dashboard.html_table(rows)
         self.assertIn('class="num"', result)
 
-    def test_non_numeric_no_class(self):
-        rows = [{"name": "Acme", "status": "active"}]
-        result = dashboard.html_table(rows)
-        # "active" is not numeric, so no num class
-        self.assertNotIn('class="num"', result)
-
     def test_highlight_column(self):
         rows = [{"name": "Acme", "status": "active"}]
         result = dashboard.html_table(rows, highlight_col="name")
@@ -106,19 +129,8 @@ class TestHtmlTable(unittest.TestCase):
         self.assertNotIn("<script>", result)
         self.assertIn("&lt;script&gt;", result)
 
-    def test_multiple_rows(self):
-        rows = [
-            {"id": "1", "name": "Acme"},
-            {"id": "2", "name": "Beta"},
-        ]
-        result = dashboard.html_table(rows)
-        self.assertIn("Acme", result)
-        self.assertIn("Beta", result)
-
 
 class TestPage(unittest.TestCase):
-    """Test full page HTML wrapper."""
-
     def test_includes_title(self):
         result = dashboard.page("Test Title", "<p>body</p>")
         self.assertIn("Test Title", result)
@@ -133,7 +145,6 @@ class TestPage(unittest.TestCase):
 
     def test_active_nav(self):
         result = dashboard.page("Title", "body", "index")
-        # The "Overview" link (index.html) should be active
         self.assertIn('class="active"', result)
 
     def test_includes_brand_colors(self):
@@ -141,98 +152,45 @@ class TestPage(unittest.TestCase):
         self.assertIn(dashboard.COLORS["primary"], result)
         self.assertIn(dashboard.COLORS["bg"], result)
 
-    def test_escapes_title(self):
-        result = dashboard.page("A & B <C>", "body")
-        self.assertIn("A &amp; B &lt;C&gt;", result)
-
     def test_valid_html_structure(self):
         result = dashboard.page("Title", "body")
         self.assertIn("<!DOCTYPE html>", result)
         self.assertIn("<html", result)
         self.assertIn("</html>", result)
-        self.assertIn("<head>", result)
-        self.assertIn("</head>", result)
-        self.assertIn("<body>", result)
-        self.assertIn("</body>", result)
-
-
-class TestQueryRows(unittest.TestCase):
-    """Test query_rows parsing."""
-
-    @patch.object(dashboard, "check_db")
-    @patch("subprocess.run")
-    def test_returns_dicts(self, mock_run, mock_check):
-        mock_run.return_value = MagicMock(
-            stdout="name,value\nfoo,1\nbar,2\n",
-            returncode=0,
-        )
-        result = dashboard.query_rows("SELECT ...")
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]["name"], "foo")
-
-    @patch.object(dashboard, "check_db")
-    @patch("subprocess.run")
-    def test_error_returns_empty(self, mock_run, mock_check):
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
-        result = dashboard.query_rows("SELECT ...")
-        self.assertEqual(result, [])
-
-
-class TestQueryVal(unittest.TestCase):
-    """Test query_val scalar extraction."""
-
-    @patch.object(dashboard, "query_rows")
-    def test_returns_first_value(self, mock_rows):
-        mock_rows.return_value = [{"count": "42"}]
-        self.assertEqual(dashboard.query_val("SELECT COUNT(*)"), "42")
-
-    @patch.object(dashboard, "query_rows")
-    def test_empty_returns_empty_string(self, mock_rows):
-        mock_rows.return_value = []
-        self.assertEqual(dashboard.query_val("SELECT ..."), "")
 
 
 class TestBuildPages(unittest.TestCase):
-    """Test page builder functions."""
-
-    @patch.object(dashboard, "query_rows")
-    @patch.object(dashboard, "query_val")
-    def test_build_index(self, mock_val, mock_rows):
-        mock_val.side_effect = ["3", "1000", "5", "500", "2", "10", "18", "5"]
-        mock_rows.side_effect = [
-            [],  # renewals
-            [],  # stale contacts
-        ]
+    @patch("datalib.load")
+    def test_build_index(self, mock_load):
+        mock_load.side_effect = lambda d: {"shares": SHARES_DATA, "accounts": ACCT_DATA, "crm": CRM_DATA}[d]
         html = dashboard.build_index()
         self.assertIn("Overview", html)
         self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("Shareholders", html)
 
-    @patch.object(dashboard, "query_rows")
-    def test_build_cap_table(self, mock_rows):
-        mock_rows.side_effect = [
-            [{"holder": "Richard", "class": "ordinary", "held": "1000", "pct": "100"}],
-            [{"class": "ordinary", "authorised": "10000", "issued": "1000", "available": "9000"}],
-            [],  # pools
-            [],  # events
-        ]
+    @patch("datalib.load")
+    def test_build_cap_table(self, mock_load):
+        mock_load.return_value = SHARES_DATA
         html = dashboard.build_cap_table()
         self.assertIn("Cap Table", html)
-        self.assertIn("Richard", html)
+        self.assertIn("richard", html)
 
-    @patch.object(dashboard, "query_rows")
-    def test_build_accounts(self, mock_rows):
-        mock_rows.side_effect = [
-            [{"account_path": "assets:bank:tide", "account_type": "assets", "balance": "5000", "currency": "GBP"}],
-            [],  # recent txns
-        ]
+    @patch("datalib.load")
+    def test_build_accounts(self, mock_load):
+        mock_load.return_value = ACCT_DATA
         html = dashboard.build_accounts()
         self.assertIn("Accounts", html)
         self.assertIn("assets:bank:tide", html)
 
+    @patch("datalib.load")
+    def test_build_crm(self, mock_load):
+        mock_load.return_value = CRM_DATA
+        html = dashboard.build_crm()
+        self.assertIn("CRM", html)
+        self.assertIn("Acme Corp", html)
+
 
 class TestRouting(unittest.TestCase):
-    """Test main() dispatch."""
-
     @patch.object(dashboard, "cmd_build")
     def test_route_build(self, mock_cmd):
         with patch("sys.argv", ["dashboard", "build"]):

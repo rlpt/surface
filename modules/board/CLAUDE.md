@@ -1,10 +1,10 @@
 # Board Module — LLM Context
 
-Board governance: meetings, minutes, attendees, and resolutions. Stored in Dolt alongside other company data.
+Board governance: meetings, minutes, attendees, and resolutions. Stored in `data/board.toml`.
 
-## Tables
+## Data keys in board.toml
 
-- `board_meetings` — meetings (id, meeting_date, title, location, status, called_by, created_at)
+- `board_meetings` — meetings (id, meeting_date, title, location, status, called_by)
 - `board_attendees` — who attended (meeting_id, person_name, role)
 - `board_minutes` — numbered minute items (meeting_id, seq, item_text)
 - `board_resolutions` — formal resolutions (id, meeting_id, resolution_text, status, proposed_by, voted_date)
@@ -26,15 +26,13 @@ board new 2026-03-15 "Q1 Board Meeting"
 # 2. Add attendees
 board attend bm-2026-03-15 "Alice Smith" chair
 board attend bm-2026-03-15 "Bob Chen" secretary
-board attend bm-2026-03-15 "Carol Davis" director
 
 # 3. Record minutes
 board minute bm-2026-03-15 1 "Meeting called to order at 10:00"
-board minute bm-2026-03-15 2 "Review of Q1 financials presented by Alice"
-board minute bm-2026-03-15 3 "Discussion of expansion plans"
+board minute bm-2026-03-15 2 "Review of Q1 financials"
 
 # 4. Propose and vote on resolutions
-board resolve bm-2026-03-15 "Approve Q1 financial statements as presented"
+board resolve bm-2026-03-15 "Approve Q1 financial statements"
 board vote bm-2026-03-15-r1 passed
 
 # 5. Generate board pack HTML
@@ -57,8 +55,8 @@ Write:
 - `board vote <resolution-id> passed|failed` — record outcome
 
 Output:
-- `board html [dir]` — generate HTML board pack (default: out/board/)
-- `board pdf pack` — full board pack as PDF (→ downloads/)
-- `board pdf meeting <id>` — single meeting as PDF (→ downloads/)
-- `board pdf resolutions` — all resolutions as PDF (→ downloads/)
+- `board html [dir]` — generate HTML board pack
+- `board pdf pack` — full board pack as PDF
+- `board pdf meeting <id>` — single meeting as PDF
+- `board pdf resolutions` — all resolutions as PDF
 - `board serve [dir]` — build and serve on localhost:8001

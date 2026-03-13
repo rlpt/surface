@@ -1,72 +1,63 @@
 # Data Module — LLM Context
 
-Version-controlled database using Dolt. The database is auto-initialised on shell entry and lives at `$SURFACE_DB` (`.surface-db/` in the project root, gitignored).
+Company data stored as TOML files in `data/` at the project root, versioned by git.
 
-## Schema
+## Files
 
-Tables: `accounts`, `transactions`, `postings`, `share_classes`, `holders`, `share_events`, `pools`, `pool_members`
+- `data/accounts.toml` — chart of accounts, transactions, postings
+- `data/shares.toml` — share classes, holders, events, pools, pool members
+- `data/crm.toml` — customers, contacts, contracts, lines, clauses
+- `data/board.toml` — meetings, attendees, minutes, resolutions
 
-Views: `holdings`, `cap_table`, `account_balances`, `class_availability`
+## Shared library
 
-Schema definition: `modules/data/schema.sql`
-Seed data: `modules/data/seed.sql`
+`modules/data/scripts/datalib.py` provides:
+
+```python
+import datalib
+data = datalib.load("shares")       # returns dict of lists from TOML
+datalib.save("shares", data)         # writes back to TOML
+datalib.git_commit("message")        # git add data/ && git commit
+
+# Computed views
+datalib.holdings(share_data)         # current holdings per holder/class
+datalib.cap_table(share_data)        # cap table with percentages
+datalib.class_availability(share_data)  # issued vs authorised
+datalib.account_balances(acct_data)  # aggregated balances
+datalib.contract_summary(crm_data)   # contracts with MRR
+datalib.renewals_due(crm_data)       # active contracts expiring in 90 days
+datalib.print_table(rows)            # formatted CLI output
+```
 
 ## Querying
 
-```bash
-data sql "SELECT * FROM holders;"           # run a query
-data sql                                     # interactive SQL shell
+```python
+data = datalib.load("shares")
+holders = data.get("holders", [])
+events = data.get("share_events", [])
+# Filter in Python
+richard_events = [e for e in events if e["holder_id"] == "richard"]
 ```
 
-Or from scripts:
-```bash
-(cd "$SURFACE_DB" && dolt sql -q "SELECT ...")      # table output
-(cd "$SURFACE_DB" && dolt sql -r csv -q "SELECT ...")  # CSV output
-```
+## Version control
 
-## Version control (dolt)
-
-Every data change can be committed independently of git:
+Data is versioned by git alongside code:
 
 ```bash
-data sql "INSERT INTO holders (id, display_name) VALUES ('alice', 'Alice Smith');"
-data diff                    # see what changed
-data commit -m "add alice"   # commit in dolt
-data log                     # view dolt history
+data diff                    # git diff data/
+data log                     # git log data/
 ```
 
-Branching works like git:
-```bash
-data branch experiment       # create branch
-data checkout experiment     # switch to it
-data sql "..."               # make changes
-data commit -m "try thing"
-data checkout main           # switch back
-```
-
-## Workflow: modifying data
-
-1. Run the appropriate INSERT/UPDATE/DELETE via `data sql`
-2. Run the relevant check command (`accounts check`, `shares check`)
-3. Commit with `data commit -m "description"`
-
-## Remotes
-
-The production data lives on formrunner, served via Dolt's remotesapi at `http://formrunner:50051/surface-db`. The `data` command auto-configures the `origin` remote on first sync.
+## CLI
 
 ```bash
-# Push local data to formrunner (after committing)
-data sync
-
-# Pull from formrunner to local
-data sync pull
+data status               # show TOML files and entry counts
+data check                # run all module validation checks
+data edit                 # open data/ in $EDITOR
+data log                  # git history for data/
+data diff                 # uncommitted changes to data/
 ```
-
-Override the remote URL with `SURFACE_DOLT_REMOTE`. CI clones from `http://localhost:50051/surface-db` (same machine). Falls back to seed data if the remote is unavailable.
 
 ## Reset
 
-If the database gets corrupted or you want to start fresh:
-```bash
-data reset    # drops and recreates from schema.sql + seed.sql
-```
+To reset to seed data: `git checkout -- data/`

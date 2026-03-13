@@ -10,10 +10,15 @@ SURFACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def import_script(module_name, script_name):
-    """Import a module script as a Python module, with subprocess mocked."""
+    """Import a module script as a Python module, with datalib on path."""
     script_path = os.path.join(
         SURFACE_ROOT, "modules", module_name, "scripts", f"{script_name}.py"
     )
+    # Ensure datalib is importable
+    datalib_path = os.path.join(SURFACE_ROOT, "modules", "data", "scripts")
+    if datalib_path not in sys.path:
+        sys.path.insert(0, datalib_path)
+
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(script_name, script_path)
@@ -22,25 +27,10 @@ def import_script(module_name, script_name):
     return mod
 
 
-def make_dolt_db_dir(tmp_path):
-    """Create a fake .dolt directory so check_db() passes."""
-    db_dir = tmp_path / ".surface-db" / ".dolt"
-    db_dir.mkdir(parents=True)
-    return str(tmp_path / ".surface-db")
-
-
-def mock_subprocess_csv(header, rows):
-    """Create a mock CompletedProcess for dsql_csv/dsql_rows calls."""
-    lines = [header] + rows
-    stdout = "\n".join(lines) + "\n"
-    return MagicMock(returncode=0, stdout=stdout, stderr="")
-
-
-def mock_subprocess_empty():
-    """Mock an empty result set (header only or nothing)."""
-    return MagicMock(returncode=0, stdout="col\n", stderr="")
-
-
-def mock_subprocess_val(value):
-    """Mock a single-value result."""
-    return MagicMock(returncode=0, stdout=f"col\n{value}\n", stderr="")
+def make_test_data(tmp_path, domain, content):
+    """Create a temporary data/ directory with TOML content for testing."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(exist_ok=True)
+    toml_file = data_dir / f"{domain}.toml"
+    toml_file.write_text(content)
+    return str(tmp_path)

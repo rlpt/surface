@@ -1,11 +1,6 @@
-Data (dolt database):
-  data init                 Initialise the database (schema + seed data)
-  data reset                Drop and recreate the database
-  data status               Show tables and row counts
-  data sql [query]          Run a SQL query (or open interactive shell)
-  data log                  Show dolt commit history
-  data diff [ref]           Show uncommitted changes
-  data commit -m 'msg'      Commit current changes
-  data branch [name]        List or create branches
-  data checkout <branch>    Switch branches
-  data sync [push|pull]     Push/pull to formrunner via dolt remote
+Data (TOML files in data/):
+  data status               Show data files and entry counts
+  data check                Run all module validation checks
+  data edit                 Open data/ in $EDITOR
+  data log                  Show git history for data/
+  data diff                 Show uncommitted changes to data/

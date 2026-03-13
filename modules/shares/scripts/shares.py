@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""shares — cap table management (dolt)"""
+"""shares — cap table management (toml)"""
 
-import csv
-import io
 import os
 import subprocess
 import sys
 from datetime import date
 
 SURFACE_ROOT = os.environ.get("SURFACE_ROOT", ".")
-SURFACE_DB = os.environ.get("SURFACE_DB", os.path.join(SURFACE_ROOT, ".surface-db"))
 DOWNLOADS_DIR = os.path.join(SURFACE_ROOT, "downloads")
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../data/scripts"))
+import datalib
 
 
 def die(msg):
@@ -18,164 +18,153 @@ def die(msg):
     sys.exit(1)
 
 
-def check_db():
-    if not os.path.isdir(os.path.join(SURFACE_DB, ".dolt")):
-        die("database not initialised — run 'data init'")
-
-
-def dsql(query):
-    check_db()
-    sys.stdout.flush()
-    subprocess.run(["dolt", "sql", "-q", query], cwd=SURFACE_DB, check=True)
-
-
-def dsql_csv(query):
-    check_db()
-    r = subprocess.run(
-        ["dolt", "sql", "-r", "csv", "-q", query],
-        cwd=SURFACE_DB,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    lines = r.stdout.strip().split("\n")
-    return lines[1:] if len(lines) > 1 else []
-
-
-def dsql_rows(query):
-    """Return list of dicts from a CSV query."""
-    check_db()
-    r = subprocess.run(
-        ["dolt", "sql", "-r", "csv", "-q", query],
-        cwd=SURFACE_DB,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return list(csv.DictReader(io.StringIO(r.stdout)))
-
-
-def dsql_val(query):
-    rows = dsql_csv(query)
-    return rows[0] if rows else ""
-
-
-def dolt_commit(msg):
-    subprocess.run(["dolt", "add", "."], cwd=SURFACE_DB, check=True)
-    subprocess.run(["dolt", "commit", "-m", msg], cwd=SURFACE_DB, check=True)
-
-
 # --- Read commands ---
 
 
 def cmd_table():
-    dsql(
-        "SELECT ct.holder, ct.class, ct.held, "
-        "CONCAT(ct.pct, '%') AS pct, ct.held AS vested "
-        "FROM cap_table ct;"
-    )
-    total = dsql_val("SELECT COALESCE(SUM(shares_held), 0) FROM holdings;")
+    data = datalib.load("shares")
+    ct = datalib.cap_table(data)
+    rows = [
+        {
+            "holder": r["holder"],
+            "class": r["class"],
+            "held": r["held"],
+            "pct": f"{r['pct']}%",
+            "vested": r["held"],
+        }
+        for r in ct
+    ]
+    datalib.print_table(rows, ["holder", "class", "held", "pct", "vested"])
+    total = sum(r["held"] for r in ct)
     print(f"\nTotal issued: {total}")
 
 
 def cmd_export():
-    check_db()
-    subprocess.run(
-        [
-            "dolt", "sql", "-r", "csv", "-q",
-            "SELECT ct.holder, ct.class AS share_class, ct.held AS shares_held, "
-            "ct.pct AS percentage, ct.held AS vested, ct.held AS total_granted, "
-            "'' AS notes FROM cap_table ct;",
-        ],
-        cwd=SURFACE_DB,
-        check=True,
-    )
+    data = datalib.load("shares")
+    ct = datalib.cap_table(data)
+    print("holder,share_class,shares_held,percentage,vested,total_granted,notes")
+    for r in ct:
+        print(f"{r['holder']},{r['class']},{r['held']},{r['pct']},{r['held']},{r['held']},")
 
 
 def cmd_holders():
-    dsql(
-        "SELECT h.id, h.display_name AS name, "
-        "COALESCE(SUM(ho.shares_held), 0) AS total "
-        "FROM holders h "
-        "LEFT JOIN holdings ho ON ho.holder_id = h.id "
-        "GROUP BY h.id, h.display_name ORDER BY h.id;"
-    )
+    data = datalib.load("shares")
+    h = datalib.holdings(data)
+    holder_totals = {}
+    for r in h:
+        holder_totals[r["holder_id"]] = holder_totals.get(r["holder_id"], 0) + r["shares_held"]
+    holders = data.get("holders", [])
+    rows = []
+    for hld in sorted(holders, key=lambda x: x["id"]):
+        rows.append({
+            "id": hld["id"],
+            "name": hld["display_name"],
+            "total": holder_totals.get(hld["id"], 0),
+        })
+    datalib.print_table(rows, ["id", "name", "total"])
 
 
 def cmd_history(filter_=""):
-    where = f"WHERE se.holder_id = '{filter_}'" if filter_ else ""
-    dsql(
-        "SELECT se.event_date AS date, se.event_type AS event, "
-        "se.holder_id AS holder, se.share_class AS class, se.quantity AS qty "
-        f"FROM share_events se {where} "
-        "ORDER BY se.event_date, se.id;"
-    )
+    data = datalib.load("shares")
+    events = data.get("share_events", [])
+    if filter_:
+        events = [e for e in events if e["holder_id"] == filter_]
+    rows = [
+        {
+            "date": e.get("event_date", ""),
+            "event": e["event_type"],
+            "holder": e["holder_id"],
+            "class": e["share_class"],
+            "qty": e["quantity"],
+        }
+        for e in sorted(events, key=lambda e: (str(e.get("event_date", "")), 0))
+    ]
+    datalib.print_table(rows, ["date", "event", "holder", "class", "qty"])
 
 
 def cmd_pools():
-    dsql(
-        "SELECT p.name AS pool, p.share_class AS class, p.budget, "
-        "COALESCE(issued.total, 0) AS issued, "
-        "p.budget - COALESCE(issued.total, 0) AS avail, "
-        "COALESCE(members.list, '-') AS members "
-        "FROM pools p "
-        "LEFT JOIN ("
-        "  SELECT pm.pool_name, SUM(COALESCE(ho.shares_held, 0)) AS total "
-        "  FROM pool_members pm "
-        "  LEFT JOIN holdings ho ON ho.holder_id = pm.holder_id "
-        "    AND ho.share_class = (SELECT share_class FROM pools WHERE name = pm.pool_name) "
-        "  GROUP BY pm.pool_name"
-        ") issued ON issued.pool_name = p.name "
-        "LEFT JOIN ("
-        "  SELECT pm.pool_name, "
-        "    GROUP_CONCAT(CONCAT(h.display_name, ' (', COALESCE(ho.shares_held, 0), ')') SEPARATOR ', ') AS list "
-        "  FROM pool_members pm "
-        "  JOIN holders h ON h.id = pm.holder_id "
-        "  LEFT JOIN holdings ho ON ho.holder_id = pm.holder_id "
-        "    AND ho.share_class = (SELECT share_class FROM pools WHERE name = pm.pool_name) "
-        "  GROUP BY pm.pool_name"
-        ") members ON members.pool_name = p.name "
-        "ORDER BY p.name;"
-    )
+    data = datalib.load("shares")
+    pools = data.get("pools", [])
+    pool_members = data.get("pool_members", [])
+    h = datalib.holdings(data)
+    holders_map = {r["id"]: r["display_name"] for r in data.get("holders", [])}
+
+    holdings_map = {}
+    for r in h:
+        holdings_map[(r["holder_id"], r["share_class"])] = r["shares_held"]
+
+    members_by_pool = {}
+    for pm in pool_members:
+        members_by_pool.setdefault(pm["pool_name"], []).append(pm["holder_id"])
+
+    rows = []
+    for p in sorted(pools, key=lambda x: x["name"]):
+        cls = p["share_class"]
+        members = members_by_pool.get(p["name"], [])
+        issued = sum(holdings_map.get((mid, cls), 0) for mid in members)
+        avail = p["budget"] - issued
+        if members:
+            member_strs = []
+            for mid in members:
+                name = holders_map.get(mid, mid)
+                held = holdings_map.get((mid, cls), 0)
+                member_strs.append(f"{name} ({held})")
+            members_list = ", ".join(member_strs)
+        else:
+            members_list = "-"
+        rows.append({
+            "pool": p["name"],
+            "class": cls,
+            "budget": p["budget"],
+            "issued": issued,
+            "avail": avail,
+            "members": members_list,
+        })
+    datalib.print_table(rows, ["pool", "class", "budget", "issued", "avail", "members"])
 
 
 def cmd_check():
+    data = datalib.load("shares")
+    events = data.get("share_events", [])
+    holders = {h["id"] for h in data.get("holders", [])}
+    classes = {sc["name"] for sc in data.get("share_classes", [])}
     errors = 0
 
-    bad_holders = dsql_csv(
-        "SELECT DISTINCT se.holder_id FROM share_events se "
-        "LEFT JOIN holders h ON h.id = se.holder_id WHERE h.id IS NULL;"
-    )
+    # Check 1: bad holders
+    bad_holders = sorted({e["holder_id"] for e in events if e["holder_id"] not in holders})
     if bad_holders:
         print(f"error: events reference unknown holders: {', '.join(bad_holders)}")
         errors += 1
 
-    bad_classes = dsql_csv(
-        "SELECT DISTINCT se.share_class FROM share_events se "
-        "LEFT JOIN share_classes sc ON sc.name = se.share_class WHERE sc.name IS NULL;"
-    )
+    # Check 2: bad classes
+    bad_classes = sorted({e["share_class"] for e in events if e["share_class"] not in classes})
     if bad_classes:
         print(f"error: events reference unknown share classes: {', '.join(bad_classes)}")
         errors += 1
 
-    negative = dsql_csv(
-        "SELECT holder_id, share_class, "
-        "SUM(CASE WHEN event_type IN ('grant', 'transfer-in') THEN quantity ELSE -quantity END) AS net "
-        "FROM share_events GROUP BY holder_id, share_class HAVING net < 0;"
-    )
+    # Check 3: negative holdings
+    from collections import defaultdict
+    totals = defaultdict(int)
+    for e in events:
+        key = (e["holder_id"], e["share_class"])
+        if e["event_type"] in ("grant", "transfer-in"):
+            totals[key] += e["quantity"]
+        else:
+            totals[key] -= e["quantity"]
+    negative = [(k, v) for k, v in sorted(totals.items()) if v < 0]
     if negative:
         print("error: negative holdings found:")
-        for n in negative:
-            print(f"  {n}")
+        for (hid, cls), net in negative:
+            print(f"  {hid},{cls},{net}")
         errors += 1
 
-    over = dsql_csv(
-        "SELECT class, authorised, issued FROM class_availability WHERE issued > authorised;"
-    )
+    # Check 4: over-issued
+    ca = datalib.class_availability(data)
+    over = [r for r in ca if r["issued"] > r["authorised"]]
     if over:
         print("error: issued exceeds authorised:")
         for o in over:
-            print(f"  {o}")
+            print(f"  {o['class']},{o['authorised']},{o['issued']}")
         errors += 1
 
     if errors:
@@ -186,26 +175,29 @@ def cmd_check():
 
 
 def cmd_brief():
+    data = datalib.load("shares")
     print("# shares context\n")
 
     print("## classes")
-    for row in dsql_rows("SELECT name, nominal_value, nominal_currency, authorised FROM share_classes;"):
-        print(f"  {row['name']}  nominal={row['nominal_currency']}{row['nominal_value']}  authorised={row['authorised']}")
+    for sc in data.get("share_classes", []):
+        print(f"  {sc['name']}  nominal={sc['nominal_currency']}{sc['nominal_value']}  authorised={sc['authorised']}")
     print()
 
     print("## holders")
-    for row in dsql_rows("SELECT id, display_name FROM holders ORDER BY id;"):
-        print(f"  {row['id']}  {row['display_name']}")
+    for h in sorted(data.get("holders", []), key=lambda x: x["id"]):
+        print(f"  {h['id']}  {h['display_name']}")
     print()
 
     print("## holdings")
-    for row in dsql_rows("SELECT holder, class, held, pct FROM cap_table;"):
-        print(f"  {row['holder']}  {row['class']}  held={row['held']} ({row['pct']}%)  vested={row['held']}")
+    ct = datalib.cap_table(data)
+    for r in ct:
+        print(f"  {r['holder']}  {r['class']}  held={r['held']} ({r['pct']}%)  vested={r['held']}")
     print()
 
     print("## availability")
-    for row in dsql_rows("SELECT class, issued, authorised, available FROM class_availability;"):
-        print(f"  {row['class']}  issued={row['issued']}/{row['authorised']}  available={row['available']}")
+    ca = datalib.class_availability(data)
+    for r in ca:
+        print(f"  {r['class']}  issued={r['issued']}/{r['authorised']}  available={r['available']}")
 
 
 # --- Mutation commands ---
@@ -214,26 +206,38 @@ def cmd_brief():
 def cmd_grant(args):
     if len(args) < 3:
         die("usage: shares grant <holder-id> <class> <quantity>")
-    holder, cls, qty = args[0], args[1], args[2]
+    holder, cls, qty = args[0], args[1], int(args[2])
 
-    hname = dsql_val(f"SELECT display_name FROM holders WHERE id = '{holder}';")
-    if not hname:
+    data = datalib.load("shares")
+
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    if holder not in holders_map:
         die(f"unknown holder: {holder}")
+    hname = holders_map[holder]
 
-    cauth = dsql_val(f"SELECT authorised FROM share_classes WHERE name = '{cls}';")
-    if not cauth:
+    classes = {sc["name"] for sc in data.get("share_classes", [])}
+    if cls not in classes:
         die(f"unknown share class: {cls}")
 
-    avail = dsql_val(f"SELECT available FROM class_availability WHERE class = '{cls}';")
-    if int(qty) > int(avail):
+    ca = datalib.class_availability(data)
+    avail = 0
+    for r in ca:
+        if r["class"] == cls:
+            avail = r["available"]
+            break
+    if qty > avail:
         die(f"insufficient shares: requested {qty} but only {avail} available in class '{cls}'")
 
     today = date.today().isoformat()
-    dsql(
-        "INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity) "
-        f"VALUES ('{today}', 'grant', '{holder}', '{cls}', {qty});"
-    )
-    dolt_commit(f"grant {qty} {cls} to {holder}")
+    data.setdefault("share_events", []).append({
+        "event_date": today,
+        "event_type": "grant",
+        "holder_id": holder,
+        "share_class": cls,
+        "quantity": qty,
+    })
+    datalib.save("shares", data)
+    datalib.git_commit(f"grant {qty} {cls} to {holder}")
 
     print(f"Granted {qty} {cls} shares to {hname}\n")
     cmd_table()
@@ -242,30 +246,45 @@ def cmd_grant(args):
 def cmd_transfer(args):
     if len(args) < 4:
         die("usage: shares transfer <from-id> <to-id> <class> <quantity>")
-    frm, to, cls, qty = args[0], args[1], args[2], args[3]
+    frm, to, cls, qty = args[0], args[1], args[2], int(args[3])
 
-    fname = dsql_val(f"SELECT display_name FROM holders WHERE id = '{frm}';")
-    if not fname:
+    data = datalib.load("shares")
+
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    if frm not in holders_map:
         die(f"unknown holder: {frm}")
+    fname = holders_map[frm]
 
-    tname = dsql_val(f"SELECT display_name FROM holders WHERE id = '{to}';")
-    if not tname:
+    if to not in holders_map:
         die(f"unknown holder: {to}")
+    tname = holders_map[to]
 
-    held = dsql_val(
-        f"SELECT COALESCE(shares_held, 0) FROM holdings "
-        f"WHERE holder_id = '{frm}' AND share_class = '{cls}';"
-    ) or "0"
-    if int(qty) > int(held):
+    h = datalib.holdings(data)
+    held = 0
+    for r in h:
+        if r["holder_id"] == frm and r["share_class"] == cls:
+            held = r["shares_held"]
+            break
+    if qty > held:
         die(f"{fname} only holds {held} {cls} shares, cannot transfer {qty}")
 
     today = date.today().isoformat()
-    dsql(
-        "INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity) VALUES "
-        f"('{today}', 'transfer-out', '{frm}', '{cls}', {qty}), "
-        f"('{today}', 'transfer-in', '{to}', '{cls}', {qty});"
-    )
-    dolt_commit(f"transfer {qty} {cls} from {frm} to {to}")
+    data.setdefault("share_events", []).append({
+        "event_date": today,
+        "event_type": "transfer-out",
+        "holder_id": frm,
+        "share_class": cls,
+        "quantity": qty,
+    })
+    data["share_events"].append({
+        "event_date": today,
+        "event_type": "transfer-in",
+        "holder_id": to,
+        "share_class": cls,
+        "quantity": qty,
+    })
+    datalib.save("shares", data)
+    datalib.git_commit(f"transfer {qty} {cls} from {frm} to {to}")
 
     print(f"Transferred {qty} {cls} shares: {fname} -> {tname}\n")
     cmd_table()
@@ -276,27 +295,34 @@ def cmd_add_holder(args):
         die('usage: shares add-holder <id> "Display Name"')
     hid, name = args[0], args[1]
 
-    existing = dsql_val(f"SELECT id FROM holders WHERE id = '{hid}';")
-    if existing:
+    data = datalib.load("shares")
+    existing = {h["id"] for h in data.get("holders", [])}
+    if hid in existing:
         die(f"holder '{hid}' already exists")
 
-    esc_name = name.replace("'", "''")
-    dsql(f"INSERT INTO holders (id, display_name) VALUES ('{hid}', '{esc_name}');")
-    dolt_commit(f"add holder: {name} ({hid})")
+    data.setdefault("holders", []).append({"id": hid, "display_name": name})
+    datalib.save("shares", data)
+    datalib.git_commit(f"add holder: {name} ({hid})")
     print(f"Added holder: {name} ({hid})")
 
 
 def cmd_add_pool(args):
     if len(args) < 3:
         die("usage: shares add-pool <name> <class> <budget>")
-    name, cls, budget = args[0], args[1], args[2]
+    name, cls, budget = args[0], args[1], int(args[2])
 
-    cauth = dsql_val(f"SELECT authorised FROM share_classes WHERE name = '{cls}';")
-    if not cauth:
+    data = datalib.load("shares")
+    classes = {sc["name"] for sc in data.get("share_classes", [])}
+    if cls not in classes:
         die(f"unknown share class: {cls}")
 
-    dsql(f"INSERT INTO pools (name, share_class, budget) VALUES ('{name}', '{cls}', {budget});")
-    dolt_commit(f"add pool: {name} ({budget} {cls})")
+    data.setdefault("pools", []).append({
+        "name": name,
+        "share_class": cls,
+        "budget": budget,
+    })
+    datalib.save("shares", data)
+    datalib.git_commit(f"add pool: {name} ({budget} {cls})")
     print(f"Added pool: {name} — {budget} {cls} shares")
 
 
@@ -305,17 +331,23 @@ def cmd_pool_add(args):
         die("usage: shares pool-add <pool> <holder-id>")
     pool, holder = args[0], args[1]
 
-    pname = dsql_val(f"SELECT name FROM pools WHERE name = '{pool}';")
-    if not pname:
+    data = datalib.load("shares")
+
+    pool_names = {p["name"] for p in data.get("pools", [])}
+    if pool not in pool_names:
         die(f"unknown pool: {pool}")
 
-    hname = dsql_val(f"SELECT display_name FROM holders WHERE id = '{holder}';")
-    if not hname:
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    if holder not in holders_map:
         die(f"unknown holder: {holder}")
 
-    dsql(f"INSERT INTO pool_members (pool_name, holder_id) VALUES ('{pool}', '{holder}');")
-    dolt_commit(f"add {holder} to pool {pool}")
-    print(f"Added {hname} to pool {pool}")
+    data.setdefault("pool_members", []).append({
+        "pool_name": pool,
+        "holder_id": holder,
+    })
+    datalib.save("shares", data)
+    datalib.git_commit(f"add {holder} to pool {pool}")
+    print(f"Added {holders_map[holder]} to pool {pool}")
 
 
 def cmd_push(args):
@@ -349,25 +381,30 @@ def generate_pdf(output_file, markdown):
 
 
 def cmd_pdf_table():
+    data = datalib.load("shares")
+    ct = datalib.cap_table(data)
+    total = sum(r["held"] for r in ct)
     today = date.today().isoformat()
     output = os.path.join(DOWNLOADS_DIR, f"cap-table-{today}.pdf")
-    total = dsql_val("SELECT COALESCE(SUM(shares_held), 0) FROM holdings;")
 
     lines = [f"# Formabi — Cap Table\n", f"Generated: {today}\n"]
 
-    if total == "0":
+    if total == 0:
         lines.append("No shares issued.")
     else:
         lines.append("| Holder | Class | Held | % | Vested |")
         lines.append("|--------|-------|-----:|--:|-------:|")
-        for row in dsql_rows("SELECT holder, class, held, pct FROM cap_table;"):
-            lines.append(f"| {row['holder']} | {row['class']} | {row['held']} | {row['pct']}% | {row['held']} |")
+        for r in ct:
+            lines.append(f"| {r['holder']} | {r['class']} | {r['held']} | {r['pct']}% | {r['held']} |")
         lines.append(f"\n**Total issued:** {total}")
 
     generate_pdf(output, "\n".join(lines))
 
 
 def cmd_pdf_history():
+    data = datalib.load("shares")
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    events = data.get("share_events", [])
     today = date.today().isoformat()
     output = os.path.join(DOWNLOADS_DIR, f"share-history-{today}.pdf")
 
@@ -377,14 +414,11 @@ def cmd_pdf_history():
         "| Date | Event | Holder | Class | Qty |",
         "|------|-------|--------|-------|----:|",
     ]
-    for row in dsql_rows(
-        "SELECT se.event_date, se.event_type, h.display_name, se.share_class, se.quantity "
-        "FROM share_events se JOIN holders h ON h.id = se.holder_id "
-        "ORDER BY se.event_date, se.id;"
-    ):
+    for e in sorted(events, key=lambda e: (str(e.get("event_date", "")), 0)):
+        name = holders_map.get(e["holder_id"], e["holder_id"])
         lines.append(
-            f"| {row['event_date']} | {row['event_type']} | {row['display_name']} "
-            f"| {row['share_class']} | {row['quantity']} |"
+            f"| {e.get('event_date', '')} | {e['event_type']} | {name} "
+            f"| {e['share_class']} | {e['quantity']} |"
         )
 
     generate_pdf(output, "\n".join(lines))
@@ -394,9 +428,21 @@ def cmd_pdf_holder(holder_id):
     if not holder_id:
         die("usage: shares pdf holder <holder-id>")
 
-    name = dsql_val(f"SELECT display_name FROM holders WHERE id = '{holder_id}';")
-    if not name:
+    data = datalib.load("shares")
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    if holder_id not in holders_map:
         die(f"unknown holder: {holder_id}")
+    name = holders_map[holder_id]
+
+    ct = datalib.cap_table(data)
+    holder_ct = [r for r in ct if r["holder_id"] == holder_id]
+
+    h = datalib.holdings(data)
+    htotal = sum(r["shares_held"] for r in h if r["holder_id"] == holder_id)
+
+    events = data.get("share_events", [])
+    holder_events = [e for e in events if e["holder_id"] == holder_id]
+    holder_events.sort(key=lambda e: (str(e.get("event_date", "")), 0))
 
     today = date.today().isoformat()
     output = os.path.join(DOWNLOADS_DIR, f"{holder_id}-statement-{today}.pdf")
@@ -409,20 +455,16 @@ def cmd_pdf_holder(holder_id):
         "| Class | Held | % | Vested |",
         "|-------|-----:|--:|-------:|",
     ]
-    for row in dsql_rows(f"SELECT class, held, pct FROM cap_table WHERE holder_id = '{holder_id}';"):
-        lines.append(f"| {row['class']} | {row['held']} | {row['pct']}% | {row['held']} |")
+    for r in holder_ct:
+        lines.append(f"| {r['class']} | {r['held']} | {r['pct']}% | {r['held']} |")
 
-    htotal = dsql_val(f"SELECT COALESCE(SUM(shares_held), 0) FROM holdings WHERE holder_id = '{holder_id}';")
     lines.append(f"\n**Total shares:** {htotal}\n")
 
     lines.append("## Event History\n")
     lines.append("| Date | Event | Class | Qty |")
     lines.append("|------|-------|-------|----:|")
-    for row in dsql_rows(
-        f"SELECT event_date, event_type, share_class, quantity "
-        f"FROM share_events WHERE holder_id = '{holder_id}' ORDER BY event_date, id;"
-    ):
-        lines.append(f"| {row['event_date']} | {row['event_type']} | {row['share_class']} | {row['quantity']} |")
+    for e in holder_events:
+        lines.append(f"| {e.get('event_date', '')} | {e['event_type']} | {e['share_class']} | {e['quantity']} |")
 
     generate_pdf(output, "\n".join(lines))
 
@@ -448,7 +490,7 @@ def cmd_pdf(args):
 
 
 def cmd_help():
-    print("shares — cap table management (dolt)")
+    print("shares — cap table management (toml)")
     print()
     print("Usage: shares <command> [args]")
     print()

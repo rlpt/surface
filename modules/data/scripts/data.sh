@@ -1,163 +1,70 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SURFACE_DB="${SURFACE_DB:-$SURFACE_ROOT/.surface-db}"
-DATA_MODULE="${SURFACE_ROOT}/modules/data"
+SURFACE_ROOT="${SURFACE_ROOT:-.}"
+DATA_DIR="${SURFACE_ROOT}/data"
 
 die() { echo "error: $1" >&2; exit 1; }
 
-dsql() {
-  (cd "$SURFACE_DB" && dolt sql "$@")
-}
-
-cmd_init() {
-  if [ -d "$SURFACE_DB/.dolt" ]; then
-    echo "Database already exists at $SURFACE_DB"
-    echo "Use 'data reset' to recreate."
-    return
-  fi
-
-  mkdir -p "$SURFACE_DB"
-  (
-    cd "$SURFACE_DB"
-    dolt init --name "surface" --email "system@formabi.com"
-    dolt sql < "$DATA_MODULE/schema.sql"
-    dolt sql < "$DATA_MODULE/seed.sql"
-    dolt add .
-    dolt commit -m "init: schema and seed data"
-  )
-  echo "Database initialised at $SURFACE_DB"
-}
-
-cmd_reset() {
-  if [ -d "$SURFACE_DB" ]; then
-    rm -rf "$SURFACE_DB"
-    echo "Removed $SURFACE_DB"
-  fi
-  cmd_init
-}
-
 cmd_status() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-
-  echo "Database: $SURFACE_DB"
+  echo "Data directory: $DATA_DIR"
   echo ""
-  echo "Tables:"
-  dsql -q "SHOW TABLES;"
-  echo ""
-  echo "Row counts:"
-  dsql -q "
-    SELECT 'accounts' AS tbl, COUNT(*) AS cnt FROM accounts
-    UNION ALL SELECT 'transactions', COUNT(*) FROM transactions
-    UNION ALL SELECT 'postings', COUNT(*) FROM postings
-    UNION ALL SELECT 'share_classes', COUNT(*) FROM share_classes
-    UNION ALL SELECT 'holders', COUNT(*) FROM holders
-    UNION ALL SELECT 'share_events', COUNT(*) FROM share_events
-    UNION ALL SELECT 'pools', COUNT(*) FROM pools
-    UNION ALL SELECT 'pool_members', COUNT(*) FROM pool_members
-    UNION ALL SELECT 'contacts', COUNT(*) FROM contacts
-    UNION ALL SELECT 'interactions', COUNT(*) FROM interactions
-    UNION ALL SELECT 'deals', COUNT(*) FROM deals
-    UNION ALL SELECT 'tags', COUNT(*) FROM tags;
-  "
+  for f in "$DATA_DIR"/*.toml; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f" .toml)
+    # Count array-of-tables entries
+    count=$(grep -c '^\[\[' "$f" 2>/dev/null || echo "0")
+    echo "  $name.toml  ($count entries)"
+  done
 }
 
-cmd_sql() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  if [ $# -gt 0 ]; then
-    dsql -q "$*"
-  else
-    dsql
+cmd_check() {
+  echo "Running module checks..."
+  local errors=0
+  python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" check || errors=$((errors + 1))
+  python3 "$SURFACE_ROOT/modules/accounts/scripts/accounts.py" check || errors=$((errors + 1))
+  if [ "$errors" -gt 0 ]; then
+    echo ""
+    echo "$errors module(s) reported errors"
+    exit 1
   fi
+  echo ""
+  echo "All checks passed"
+}
+
+cmd_edit() {
+  ${EDITOR:-vi} "$DATA_DIR"
 }
 
 cmd_log() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  (cd "$SURFACE_DB" && dolt log "$@")
+  git -C "$SURFACE_ROOT" log --oneline -- data/
 }
 
 cmd_diff() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  (cd "$SURFACE_DB" && dolt diff "$@")
-}
-
-cmd_commit() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  (cd "$SURFACE_DB" && dolt add . && dolt commit "$@")
-}
-
-cmd_branch() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  (cd "$SURFACE_DB" && dolt branch "$@")
-}
-
-cmd_checkout() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  (cd "$SURFACE_DB" && dolt checkout "$@")
-}
-
-DOLT_REMOTE_URL="${SURFACE_DOLT_REMOTE:-http://formrunner:50051/surface-db}"
-
-# Ensure the dolt remote 'origin' is configured
-ensure_remote() {
-  (
-    cd "$SURFACE_DB"
-    if ! dolt remote | grep -q '^origin$'; then
-      dolt remote add origin "$DOLT_REMOTE_URL"
-    fi
-  )
-}
-
-cmd_sync() {
-  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
-  ensure_remote
-  local direction="${1:-push}"
-  case "$direction" in
-    push)
-      echo "Pushing to origin ($DOLT_REMOTE_URL)"
-      (cd "$SURFACE_DB" && dolt push origin main)
-      echo "Done"
-      ;;
-    pull)
-      echo "Pulling from origin ($DOLT_REMOTE_URL)"
-      (cd "$SURFACE_DB" && dolt pull origin)
-      echo "Done"
-      ;;
-    *)
-      die "usage: data sync [push|pull]"
-      ;;
-  esac
+  git -C "$SURFACE_ROOT" diff -- data/
 }
 
 cmd_help() {
-  echo "data — surface database (dolt)"
+  echo "data — surface company data (TOML files in data/)"
   echo ""
   echo "Usage: data <command> [args]"
   echo ""
   echo "Commands:"
-  echo "  init               Initialise the database (schema + seed data)"
-  echo "  reset              Drop and recreate the database"
-  echo "  status             Show tables and row counts"
-  echo "  sql [query]        Run a SQL query (or open interactive shell)"
-  echo "  log                Show dolt commit history"
-  echo "  diff [ref]         Show uncommitted changes (or diff against ref)"
-  echo "  commit -m 'msg'    Commit current changes"
-  echo "  branch [name]      List or create branches"
-  echo "  checkout <branch>  Switch branches"
-  echo "  sync [push|pull]   Sync database with formrunner (default: push)"
+  echo "  status             Show data files and entry counts"
+  echo "  check              Run all module validation checks"
+  echo "  edit               Open data/ in \$EDITOR"
+  echo "  log                Show git history for data/"
+  echo "  diff               Show uncommitted changes to data/"
   echo "  help               Show this help"
+  echo ""
+  echo "Data files live in data/*.toml and are versioned by git."
 }
 
 case "${1:-help}" in
-  init)     cmd_init ;;
-  reset)    cmd_reset ;;
   status)   cmd_status ;;
-  sql)      shift; cmd_sql "$@" ;;
+  check)    cmd_check ;;
+  edit)     cmd_edit ;;
   log)      shift; cmd_log "$@" ;;
   diff)     shift; cmd_diff "$@" ;;
-  commit)   shift; cmd_commit "$@" ;;
-  branch)   shift; cmd_branch "$@" ;;
-  checkout) shift; cmd_checkout "$@" ;;
-  sync)     shift; cmd_sync "$@" ;;
   help|*)   cmd_help ;;
 esac

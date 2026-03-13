@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Push shares data to Google Sheets."""
 
-import csv
-import io
-import json
 import os
-import subprocess
 import sys
+from collections import defaultdict
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../data/scripts"))
+import datalib
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -28,19 +28,8 @@ def get_service():
     return build("sheets", "v4", credentials=creds)
 
 
-def dsql_csv(query):
-    db = os.environ.get("SURFACE_DB", os.path.join(os.environ["SURFACE_ROOT"], ".surface-db"))
-    result = subprocess.run(
-        ["dolt", "sql", "-r", "csv", "-q", query],
-        cwd=db, capture_output=True, text=True, check=True,
-    )
-    reader = csv.reader(io.StringIO(result.stdout))
-    return list(reader)
-
-
 def write_sheet(service, spreadsheet_id, sheet_name, rows):
     """Clear and write rows to a named sheet tab."""
-    # Ensure the sheet tab exists
     meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
     existing = [s["properties"]["title"] for s in meta.get("sheets", [])]
     if sheet_name not in existing:
@@ -61,78 +50,77 @@ def write_sheet(service, spreadsheet_id, sheet_name, rows):
 
 
 def push_table(service, spreadsheet_id):
-    rows = dsql_csv("""
-        SELECT
-            ct.holder AS Holder,
-            ct.class AS Class,
-            ct.held AS Held,
-            CONCAT(ct.pct, '%') AS Percentage,
-            ct.held AS Vested
-        FROM cap_table ct;
-    """)
-    # Add total row
-    total = dsql_csv("SELECT COALESCE(SUM(shares_held), 0) FROM holdings;")
-    rows.append(["", "", total[1][0] if len(total) > 1 else "0", "", ""])
+    share_data = datalib.load("shares")
+    ct = datalib.cap_table(share_data)
+    total = sum(r["held"] for r in ct)
+
+    rows = [["Holder", "Class", "Held", "Percentage", "Vested"]]
+    for r in ct:
+        rows.append([r["holder"], r["class"], str(r["held"]), f"{r['pct']}%", str(r["held"])])
+    rows.append(["", "", str(total), "", ""])
     write_sheet(service, spreadsheet_id, "Cap Table", rows)
 
 
 def push_history(service, spreadsheet_id):
-    rows = dsql_csv("""
-        SELECT
-            se.event_date AS Date,
-            se.event_type AS Event,
-            h.display_name AS Holder,
-            se.share_class AS Class,
-            se.quantity AS Qty
-        FROM share_events se
-        JOIN holders h ON h.id = se.holder_id
-        ORDER BY se.event_date, se.id;
-    """)
+    share_data = datalib.load("shares")
+    holders_map = {h["id"]: h["display_name"] for h in share_data.get("holders", [])}
+    events = share_data.get("share_events", [])
+
+    rows = [["Date", "Event", "Holder", "Class", "Qty"]]
+    for e in events:
+        rows.append([
+            str(e["event_date"]),
+            e["event_type"],
+            holders_map.get(e["holder_id"], e["holder_id"]),
+            e["share_class"],
+            str(e["quantity"]),
+        ])
     write_sheet(service, spreadsheet_id, "History", rows)
 
 
 def push_holders(service, spreadsheet_id):
-    rows = dsql_csv("""
-        SELECT
-            h.id AS ID,
-            h.display_name AS Name,
-            COALESCE(SUM(ho.shares_held), 0) AS Total
-        FROM holders h
-        LEFT JOIN holdings ho ON ho.holder_id = h.id
-        GROUP BY h.id, h.display_name
-        ORDER BY h.id;
-    """)
+    share_data = datalib.load("shares")
+    h = datalib.holdings(share_data)
+    holdings_map = defaultdict(int)
+    for r in h:
+        holdings_map[r["holder_id"]] += r["shares_held"]
+
+    rows = [["ID", "Name", "Total"]]
+    for holder in sorted(share_data.get("holders", []), key=lambda x: x["id"]):
+        rows.append([holder["id"], holder["display_name"], str(holdings_map.get(holder["id"], 0))])
     write_sheet(service, spreadsheet_id, "Holders", rows)
 
 
 def push_pools(service, spreadsheet_id):
-    rows = dsql_csv("""
-        SELECT
-            p.name AS Pool,
-            p.share_class AS Class,
-            p.budget AS Budget,
-            COALESCE(issued.total, 0) AS Issued,
-            p.budget - COALESCE(issued.total, 0) AS Available,
-            COALESCE(members.list, '-') AS Members
-        FROM pools p
-        LEFT JOIN (
-            SELECT pm.pool_name, SUM(COALESCE(ho.shares_held, 0)) AS total
-            FROM pool_members pm
-            LEFT JOIN holdings ho ON ho.holder_id = pm.holder_id
-                AND ho.share_class = (SELECT share_class FROM pools WHERE name = pm.pool_name)
-            GROUP BY pm.pool_name
-        ) issued ON issued.pool_name = p.name
-        LEFT JOIN (
-            SELECT pm.pool_name,
-                GROUP_CONCAT(CONCAT(h.display_name, ' (', COALESCE(ho.shares_held, 0), ')') SEPARATOR ', ') AS list
-            FROM pool_members pm
-            JOIN holders h ON h.id = pm.holder_id
-            LEFT JOIN holdings ho ON ho.holder_id = pm.holder_id
-                AND ho.share_class = (SELECT share_class FROM pools WHERE name = pm.pool_name)
-            GROUP BY pm.pool_name
-        ) members ON members.pool_name = p.name
-        ORDER BY p.name;
-    """)
+    share_data = datalib.load("shares")
+    h = datalib.holdings(share_data)
+    holders_map = {r["id"]: r["display_name"] for r in share_data.get("holders", [])}
+    holdings_map = {}
+    for r in h:
+        holdings_map[(r["holder_id"], r["share_class"])] = r["shares_held"]
+
+    rows = [["Pool", "Class", "Budget", "Issued", "Available", "Members"]]
+    for pool in sorted(share_data.get("pools", []), key=lambda x: x["name"]):
+        members = [
+            pm for pm in share_data.get("pool_members", [])
+            if pm["pool_name"] == pool["name"]
+        ]
+        issued = sum(
+            holdings_map.get((pm["holder_id"], pool["share_class"]), 0)
+            for pm in members
+        )
+        member_strs = [
+            f"{holders_map.get(pm['holder_id'], pm['holder_id'])} ({holdings_map.get((pm['holder_id'], pool['share_class']), 0)})"
+            for pm in members
+        ]
+        rows.append([
+            pool["name"],
+            pool["share_class"],
+            str(pool["budget"]),
+            str(issued),
+            str(pool["budget"] - issued),
+            ", ".join(member_strs) if member_strs else "-",
+        ])
     write_sheet(service, spreadsheet_id, "Pools", rows)
 
 

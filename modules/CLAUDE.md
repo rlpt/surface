@@ -4,7 +4,7 @@ Auto-discovered child directories under `modules/`. Each module is a `default.ni
 
 ## Data layer
 
-Structured data (accounts, shares, pools, holders) is stored in a Dolt database at `$SURFACE_DB` (`.surface-db/`, gitignored). The `data` module auto-initialises it on shell entry from `modules/data/schema.sql` and `modules/data/seed.sql`. Query with `data sql "SELECT ..."` or use module commands (`accounts bal`, `shares table`). Version data changes with `data commit -m "msg"`. Sync with formrunner via `data sync` (push) / `data sync pull` using Dolt's native remote protocol.
+Structured data (accounts, shares, pools, holders, CRM, board) is stored as TOML files in `data/` at the project root, versioned by git. The shared library `modules/data/scripts/datalib.py` loads/saves TOML and provides computed views (holdings, cap table, account balances, contract summaries). Query with Python: `datalib.load("shares")`. Version data changes with `git commit`.
 
 ## Module contract
 

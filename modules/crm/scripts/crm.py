@@ -1,71 +1,21 @@
 #!/usr/bin/env python3
-"""CRM — customer contract management (dolt)"""
+"""CRM — customer contract management (toml)"""
 
-import csv
-import io
 import os
 import subprocess
 import sys
 from datetime import date
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../data/scripts"))
+import datalib
+
 SURFACE_ROOT = os.environ.get("SURFACE_ROOT", ".")
-SURFACE_DB = os.environ.get("SURFACE_DB", os.path.join(SURFACE_ROOT, ".surface-db"))
 DOWNLOADS_DIR = os.path.join(SURFACE_ROOT, "downloads")
 
 
 def die(msg):
     print(f"error: {msg}", file=sys.stderr)
     sys.exit(1)
-
-
-def check_db():
-    if not os.path.isdir(os.path.join(SURFACE_DB, ".dolt")):
-        die("database not initialised — run 'data init'")
-
-
-def dsql(query):
-    check_db()
-    sys.stdout.flush()
-    subprocess.run(["dolt", "sql", "-q", query], cwd=SURFACE_DB, check=True)
-
-
-def dsql_csv(query):
-    check_db()
-    r = subprocess.run(
-        ["dolt", "sql", "-r", "csv", "-q", query],
-        cwd=SURFACE_DB,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    lines = r.stdout.strip().split("\n")
-    return lines[1:] if len(lines) > 1 else []
-
-
-def dsql_val(query):
-    rows = dsql_csv(query)
-    return rows[0] if rows else ""
-
-
-def dsql_rows(query):
-    check_db()
-    r = subprocess.run(
-        ["dolt", "sql", "-r", "csv", "-q", query],
-        cwd=SURFACE_DB,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    reader = csv.DictReader(io.StringIO(r.stdout))
-    return list(reader)
-
-
-def dolt_commit(msg):
-    subprocess.run(["dolt", "add", "."], cwd=SURFACE_DB, check=True)
-    subprocess.run(
-        ["dolt", "commit", "--allow-empty", "-m", msg],
-        cwd=SURFACE_DB, check=True,
-    )
 
 
 def esc(s):
@@ -175,113 +125,171 @@ STANDARD_CLAUSES = [
 
 
 def cmd_customers():
-    dsql(
-        "SELECT id, company, company_number, "
-        "(SELECT COUNT(*) FROM contracts ct WHERE ct.customer_id = cu.id) AS contracts, "
-        "(SELECT COUNT(*) FROM contacts co WHERE co.customer_id = cu.id) AS contacts "
-        "FROM customers cu ORDER BY company;"
-    )
+    crm = datalib.load("crm")
+    customers = crm.get("customers", [])
+    contracts = crm.get("contracts", [])
+    contacts = crm.get("contacts", [])
+    rows = []
+    for cu in sorted(customers, key=lambda c: c.get("company", "")):
+        cid = cu["id"]
+        ct_count = sum(1 for ct in contracts if ct["customer_id"] == cid)
+        co_count = sum(1 for co in contacts if co["customer_id"] == cid)
+        rows.append({
+            "id": cid,
+            "company": cu.get("company", ""),
+            "company_number": cu.get("company_number", ""),
+            "contracts": ct_count,
+            "contacts": co_count,
+        })
+    datalib.print_table(rows)
 
 
 def cmd_customer(cust_id):
     if not cust_id:
         die("usage: crm customer <customer-id>")
-    company = dsql_val(f"SELECT company FROM customers WHERE id = '{esc(cust_id)}';")
-    if not company:
+    crm = datalib.load("crm")
+    cu = next((c for c in crm.get("customers", []) if c["id"] == cust_id), None)
+    if not cu:
         die(f"unknown customer: {cust_id}")
-    print(f"# {company}\n")
-    dsql(
-        f"SELECT id, company, company_number, address, notes "
-        f"FROM customers WHERE id = '{esc(cust_id)}';"
-    )
+    print(f"# {cu['company']}\n")
+    datalib.print_table([{
+        "id": cu["id"],
+        "company": cu.get("company", ""),
+        "company_number": cu.get("company_number", ""),
+        "address": cu.get("address", ""),
+        "notes": cu.get("notes", ""),
+    }])
     print("\n## Contacts")
-    dsql(
-        f"SELECT id, name, email, role FROM contacts "
-        f"WHERE customer_id = '{esc(cust_id)}' ORDER BY name;"
+    contacts = sorted(
+        [co for co in crm.get("contacts", []) if co["customer_id"] == cust_id],
+        key=lambda c: c.get("name", ""),
+    )
+    datalib.print_table(
+        [{"id": co["id"], "name": co.get("name", ""), "email": co.get("email", ""),
+          "role": co.get("role", "")} for co in contacts],
     )
     print("\n## Contracts")
-    dsql(
-        f"SELECT id, title, status, effective_date, term_months, auto_renew "
-        f"FROM contracts WHERE customer_id = '{esc(cust_id)}' ORDER BY effective_date DESC;"
+    contracts = sorted(
+        [ct for ct in crm.get("contracts", []) if ct["customer_id"] == cust_id],
+        key=lambda c: c.get("effective_date", ""),
+        reverse=True,
+    )
+    datalib.print_table(
+        [{"id": ct["id"], "title": ct.get("title", ""), "status": ct.get("status", "draft"),
+          "effective_date": ct.get("effective_date", ""), "term_months": ct.get("term_months", ""),
+          "auto_renew": ct.get("auto_renew", False)} for ct in contracts],
     )
 
 
 def cmd_contracts(filter_=""):
+    rows = datalib.contract_summary()
     if filter_ == "active":
-        dsql(
-            "SELECT id, company, title, effective_date, term_months, auto_renew, "
-            "ROUND(mrr, 2) AS mrr, currency "
-            "FROM contract_summary WHERE status = 'active' ORDER BY company;"
-        )
+        rows = [r for r in rows if r["status"] == "active"]
+        rows.sort(key=lambda r: r["company"])
+        datalib.print_table(rows, columns=[
+            "id", "company", "title", "effective_date", "term_months",
+            "auto_renew", "mrr", "currency",
+        ])
     elif filter_ == "draft":
-        dsql(
-            "SELECT id, company, title, line_count, clause_count "
-            "FROM contract_summary WHERE status = 'draft' ORDER BY company;"
-        )
+        rows = [r for r in rows if r["status"] == "draft"]
+        rows.sort(key=lambda r: r["company"])
+        datalib.print_table(rows, columns=[
+            "id", "company", "title", "line_count", "clause_count",
+        ])
     else:
-        dsql(
-            "SELECT id, company, title, status, effective_date, "
-            "ROUND(mrr, 2) AS mrr, currency "
-            "FROM contract_summary ORDER BY status, company;"
-        )
+        rows.sort(key=lambda r: (r["status"], r["company"]))
+        datalib.print_table(rows, columns=[
+            "id", "company", "title", "status", "effective_date", "mrr", "currency",
+        ])
 
 
 def cmd_contract(contract_id):
     if not contract_id:
         die("usage: crm contract <contract-id>")
-    title = dsql_val(
-        f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';"
-    )
-    if not title:
+    crm = datalib.load("crm")
+    ct = next((c for c in crm.get("contracts", []) if c["id"] == contract_id), None)
+    if not ct:
         die(f"unknown contract: {contract_id}")
-    print(f"# {title}\n")
-    dsql(
-        f"SELECT ct.id, cu.company, ct.title, ct.status, ct.effective_date, "
-        f"ct.term_months, ct.auto_renew, ct.payment_terms, ct.currency, "
-        f"ct.governing_law, ct.jurisdiction, ct.notice_period_days, ct.notes "
-        f"FROM contracts ct JOIN customers cu ON cu.id = ct.customer_id "
-        f"WHERE ct.id = '{esc(contract_id)}';"
-    )
+    cu = next((c for c in crm.get("customers", []) if c["id"] == ct["customer_id"]), None)
+    company = cu["company"] if cu else ct["customer_id"]
+
+    print(f"# {ct['title']}\n")
+    datalib.print_table([{
+        "id": ct["id"],
+        "company": company,
+        "title": ct.get("title", ""),
+        "status": ct.get("status", "draft"),
+        "effective_date": ct.get("effective_date", ""),
+        "term_months": ct.get("term_months", ""),
+        "auto_renew": ct.get("auto_renew", False),
+        "payment_terms": ct.get("payment_terms", ""),
+        "currency": ct.get("currency", "GBP"),
+        "governing_law": ct.get("governing_law", ""),
+        "jurisdiction": ct.get("jurisdiction", ""),
+        "notice_period_days": ct.get("notice_period_days", ""),
+        "notes": ct.get("notes", ""),
+    }])
+
     print("\n## Lines")
-    dsql(
-        f"SELECT seq, description, quantity, unit_price, frequency "
-        f"FROM contract_lines WHERE contract_id = '{esc(contract_id)}' ORDER BY seq;"
+    lines = sorted(
+        [ln for ln in crm.get("contract_lines", []) if ln["contract_id"] == contract_id],
+        key=lambda l: l.get("seq", 0),
     )
-    total_mrr = dsql_val(
-        f"SELECT ROUND(COALESCE(SUM(CASE frequency "
-        f"WHEN 'monthly' THEN quantity * unit_price "
-        f"WHEN 'quarterly' THEN quantity * unit_price / 3 "
-        f"WHEN 'annual' THEN quantity * unit_price / 12 "
-        f"ELSE 0 END), 0), 2) FROM contract_lines "
-        f"WHERE contract_id = '{esc(contract_id)}';"
+    datalib.print_table(
+        [{"seq": ln["seq"], "description": ln.get("description", ""),
+          "quantity": ln.get("quantity", 1), "unit_price": ln["unit_price"],
+          "frequency": ln.get("frequency", "monthly")} for ln in lines],
     )
-    print(f"\nMRR: £{total_mrr}")
+
+    mrr = 0.0
+    for ln in lines:
+        qty = float(ln.get("quantity", 1))
+        price = float(ln["unit_price"])
+        freq = ln.get("frequency", "monthly")
+        if freq == "monthly":
+            mrr += qty * price
+        elif freq == "quarterly":
+            mrr += qty * price / 3
+        elif freq == "annual":
+            mrr += qty * price / 12
+    print(f"\nMRR: \u00a3{mrr:.2f}")
+
     print("\n## Clauses")
-    dsql(
-        f"SELECT seq, heading FROM contract_clauses "
-        f"WHERE contract_id = '{esc(contract_id)}' ORDER BY seq;"
+    clauses = sorted(
+        [cl for cl in crm.get("contract_clauses", []) if cl["contract_id"] == contract_id],
+        key=lambda c: c.get("seq", 0),
+    )
+    datalib.print_table(
+        [{"seq": cl["seq"], "heading": cl.get("heading", "")} for cl in clauses],
     )
 
 
 def cmd_renewals():
-    count = dsql_val("SELECT COUNT(*) FROM renewals_due;")
-    if count == "0":
+    rows = datalib.renewals_due()
+    if not rows:
         print("No renewals due in the next 90 days.")
         return
-    dsql("SELECT * FROM renewals_due;")
+    datalib.print_table(rows)
 
 
 def cmd_find(term):
     if not term:
         die("usage: crm find <term>")
-    e = esc(term)
-    dsql(
-        f"SELECT cu.id, cu.company, "
-        f"(SELECT COUNT(*) FROM contracts ct WHERE ct.customer_id = cu.id) AS contracts "
-        f"FROM customers cu "
-        f"WHERE cu.company LIKE '%{e}%' OR cu.id LIKE '%{e}%' "
-        f"ORDER BY cu.company;"
-    )
+    crm = datalib.load("crm")
+    customers = crm.get("customers", [])
+    contracts = crm.get("contracts", [])
+    t = term.lower()
+    rows = []
+    for cu in sorted(customers, key=lambda c: c.get("company", "")):
+        if t in cu.get("company", "").lower() or t in cu["id"].lower():
+            cid = cu["id"]
+            ct_count = sum(1 for ct in contracts if ct["customer_id"] == cid)
+            rows.append({
+                "id": cid,
+                "company": cu.get("company", ""),
+                "contracts": ct_count,
+            })
+    datalib.print_table(rows)
 
 
 # ── Write commands ──────────────────────────────────────────────────────────
@@ -293,11 +301,19 @@ def cmd_add_customer(args):
     cust_id = args[0]
     company = args[1]
     co_num = args[2] if len(args) > 2 else ""
-    dsql(
-        f"INSERT INTO customers (id, company, company_number) "
-        f"VALUES ('{esc(cust_id)}', '{esc(company)}', '{esc(co_num)}');"
-    )
-    dolt_commit(f"crm: add customer {company} ({cust_id})")
+    crm = datalib.load("crm")
+    customers = crm.get("customers", [])
+    customers.append({
+        "id": cust_id,
+        "company": company,
+        "company_number": co_num,
+        "address": "",
+        "notes": "",
+        "created_at": date.today().isoformat(),
+    })
+    crm["customers"] = customers
+    datalib.save("crm", crm)
+    datalib.git_commit(f"crm: add customer {company} ({cust_id})")
     print(f"Added customer: {company} ({cust_id})")
 
 
@@ -307,12 +323,18 @@ def cmd_add_contact(args):
     cust_id, name, email = args[0], args[1], args[2]
     role = args[3] if len(args) > 3 else ""
     contact_id = f"{cust_id}-{name.lower().split()[0]}"
-    dsql(
-        f"INSERT INTO contacts (id, customer_id, name, email, role) "
-        f"VALUES ('{esc(contact_id)}', '{esc(cust_id)}', '{esc(name)}', "
-        f"'{esc(email)}', '{esc(role)}');"
-    )
-    dolt_commit(f"crm: add contact {name} at {cust_id}")
+    crm = datalib.load("crm")
+    contacts = crm.get("contacts", [])
+    contacts.append({
+        "id": contact_id,
+        "customer_id": cust_id,
+        "name": name,
+        "email": email,
+        "role": role,
+    })
+    crm["contacts"] = contacts
+    datalib.save("crm", crm)
+    datalib.git_commit(f"crm: add contact {name} at {cust_id}")
     print(f"Added contact: {name} ({contact_id})")
 
 
@@ -321,20 +343,22 @@ def cmd_new_contract(args):
         die('usage: crm new <customer-id> "Contract Title"')
     cust_id = args[0]
     title = args[1]
-    company = dsql_val(f"SELECT company FROM customers WHERE id = '{esc(cust_id)}';")
-    if not company:
+    crm = datalib.load("crm")
+    cu = next((c for c in crm.get("customers", []) if c["id"] == cust_id), None)
+    if not cu:
         die(f"unknown customer: {cust_id}")
-    # generate id: ct-<customer>-<seq>
-    count = dsql_val(
-        f"SELECT COUNT(*) FROM contracts WHERE customer_id = '{esc(cust_id)}';"
-    )
-    seq = int(count) + 1
+    contracts = crm.get("contracts", [])
+    seq = sum(1 for ct in contracts if ct["customer_id"] == cust_id) + 1
     contract_id = f"ct-{cust_id}-{seq}"
-    dsql(
-        f"INSERT INTO contracts (id, customer_id, title) "
-        f"VALUES ('{esc(contract_id)}', '{esc(cust_id)}', '{esc(title)}');"
-    )
-    dolt_commit(f"crm: draft contract {contract_id} — {title}")
+    contracts.append({
+        "id": contract_id,
+        "customer_id": cust_id,
+        "title": title,
+        "status": "draft",
+    })
+    crm["contracts"] = contracts
+    datalib.save("crm", crm)
+    datalib.git_commit(f"crm: draft contract {contract_id} — {title}")
     print(f"Created draft contract: {contract_id}")
 
 
@@ -343,50 +367,68 @@ def cmd_line(args):
         die('usage: crm line <contract-id> <seq> "description" <unit-price> [frequency]')
     contract_id, seq_s, desc, price_s = args[0], args[1], args[2], args[3]
     freq = args[4] if len(args) > 4 else "monthly"
-    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
-    if not title:
+    crm = datalib.load("crm")
+    ct = next((c for c in crm.get("contracts", []) if c["id"] == contract_id), None)
+    if not ct:
         die(f"unknown contract: {contract_id}")
-    dsql(
-        f"INSERT INTO contract_lines (contract_id, seq, description, unit_price, frequency) "
-        f"VALUES ('{esc(contract_id)}', {seq_s}, '{esc(desc)}', {price_s}, '{esc(freq)}');"
-    )
-    dolt_commit(f"crm: line {seq_s} on {contract_id} — {desc}")
-    print(f"Added line {seq_s}: {desc} @ £{price_s}/{freq}")
+    lines = crm.get("contract_lines", [])
+    lines.append({
+        "contract_id": contract_id,
+        "seq": int(seq_s),
+        "description": desc,
+        "quantity": 1,
+        "unit_price": float(price_s),
+        "frequency": freq,
+    })
+    crm["contract_lines"] = lines
+    datalib.save("crm", crm)
+    datalib.git_commit(f"crm: line {seq_s} on {contract_id} — {desc}")
+    print(f"Added line {seq_s}: {desc} @ \u00a3{price_s}/{freq}")
 
 
 def cmd_clause(args):
     if len(args) < 4:
         die('usage: crm clause <contract-id> <seq> "Heading" "body text"')
     contract_id, seq_s, heading, body = args[0], args[1], args[2], args[3]
-    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
-    if not title:
+    crm = datalib.load("crm")
+    ct = next((c for c in crm.get("contracts", []) if c["id"] == contract_id), None)
+    if not ct:
         die(f"unknown contract: {contract_id}")
-    dsql(
-        f"INSERT INTO contract_clauses (contract_id, seq, heading, body) "
-        f"VALUES ('{esc(contract_id)}', {seq_s}, '{esc(heading)}', '{esc(body)}');"
-    )
-    dolt_commit(f"crm: clause {seq_s} on {contract_id} — {heading}")
+    clauses = crm.get("contract_clauses", [])
+    clauses.append({
+        "contract_id": contract_id,
+        "seq": int(seq_s),
+        "heading": heading,
+        "body": body,
+    })
+    crm["contract_clauses"] = clauses
+    datalib.save("crm", crm)
+    datalib.git_commit(f"crm: clause {seq_s} on {contract_id} — {heading}")
     print(f"Added clause {seq_s}: {heading}")
 
 
 def cmd_standard_clauses(contract_id):
     if not contract_id:
         die("usage: crm standard-clauses <contract-id>")
-    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
-    if not title:
+    crm = datalib.load("crm")
+    ct = next((c for c in crm.get("contracts", []) if c["id"] == contract_id), None)
+    if not ct:
         die(f"unknown contract: {contract_id}")
-    existing = dsql_val(
-        f"SELECT COUNT(*) FROM contract_clauses WHERE contract_id = '{esc(contract_id)}';"
-    )
-    start_seq = int(existing) + 1
+    clauses = crm.get("contract_clauses", [])
+    existing = sum(1 for cl in clauses if cl["contract_id"] == contract_id)
+    start_seq = existing + 1
     for i, (heading, body) in enumerate(STANDARD_CLAUSES):
         seq = start_seq + i
-        dsql(
-            f"INSERT INTO contract_clauses (contract_id, seq, heading, body) "
-            f"VALUES ('{esc(contract_id)}', {seq}, '{esc(heading)}', '{esc(body)}');"
-        )
-    dolt_commit(f"crm: standard clauses on {contract_id}")
-    print(f"Added {len(STANDARD_CLAUSES)} standard clauses (seq {start_seq}–{start_seq + len(STANDARD_CLAUSES) - 1})")
+        clauses.append({
+            "contract_id": contract_id,
+            "seq": seq,
+            "heading": heading,
+            "body": body,
+        })
+    crm["contract_clauses"] = clauses
+    datalib.save("crm", crm)
+    datalib.git_commit(f"crm: standard clauses on {contract_id}")
+    print(f"Added {len(STANDARD_CLAUSES)} standard clauses (seq {start_seq}\u2013{start_seq + len(STANDARD_CLAUSES) - 1})")
 
 
 def cmd_set(args):
@@ -408,28 +450,33 @@ def cmd_set(args):
     col = allowed.get(field)
     if not col:
         die(f"unknown field: {field}\nAllowed: {', '.join(sorted(allowed.keys()))}")
-    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
-    if not title:
+    crm = datalib.load("crm")
+    contracts = crm.get("contracts", [])
+    ct = next((c for c in contracts if c["id"] == contract_id), None)
+    if not ct:
         die(f"unknown contract: {contract_id}")
     if col in ("term_months", "notice_period_days"):
-        dsql(f"UPDATE contracts SET {col} = {value} WHERE id = '{esc(contract_id)}';")
+        ct[col] = int(value)
     elif col == "auto_renew":
-        bval = "TRUE" if value.lower() in ("true", "yes", "1") else "FALSE"
-        dsql(f"UPDATE contracts SET {col} = {bval} WHERE id = '{esc(contract_id)}';")
+        ct[col] = value.lower() in ("true", "yes", "1")
     else:
-        dsql(f"UPDATE contracts SET {col} = '{esc(value)}' WHERE id = '{esc(contract_id)}';")
-    dolt_commit(f"crm: set {field}={value} on {contract_id}")
+        ct[col] = value
+    datalib.save("crm", crm)
+    datalib.git_commit(f"crm: set {field}={value} on {contract_id}")
     print(f"Set {field} = {value} on {contract_id}")
 
 
 def cmd_activate(contract_id):
     if not contract_id:
         die("usage: crm activate <contract-id>")
-    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
-    if not title:
+    crm = datalib.load("crm")
+    contracts = crm.get("contracts", [])
+    ct = next((c for c in contracts if c["id"] == contract_id), None)
+    if not ct:
         die(f"unknown contract: {contract_id}")
-    dsql(f"UPDATE contracts SET status = 'active' WHERE id = '{esc(contract_id)}';")
-    dolt_commit(f"crm: activate {contract_id}")
+    ct["status"] = "active"
+    datalib.save("crm", crm)
+    datalib.git_commit(f"crm: activate {contract_id}")
     print(f"Contract {contract_id} is now active")
 
 
@@ -458,25 +505,38 @@ def generate_pdf(output_file, markdown):
 
 def contract_markdown(contract_id):
     """Build full contract document as markdown."""
-    rows = dsql_rows(
-        f"SELECT ct.id, cu.company, cu.company_number, cu.address, "
-        f"ct.title, ct.status, ct.effective_date, ct.term_months, "
-        f"ct.auto_renew, ct.payment_terms, ct.currency, "
-        f"ct.governing_law, ct.jurisdiction, ct.notice_period_days "
-        f"FROM contracts ct JOIN customers cu ON cu.id = ct.customer_id "
-        f"WHERE ct.id = '{esc(contract_id)}'"
-    )
-    if not rows:
+    crm = datalib.load("crm")
+    ct = next((c for c in crm.get("contracts", []) if c["id"] == contract_id), None)
+    if not ct:
         return None
-    c = rows[0]
+    cu = next((c for c in crm.get("customers", []) if c["id"] == ct["customer_id"]), None)
+    if not cu:
+        return None
 
-    lines = dsql_rows(
-        f"SELECT seq, description, quantity, unit_price, frequency "
-        f"FROM contract_lines WHERE contract_id = '{esc(contract_id)}' ORDER BY seq"
+    c = {
+        "id": ct["id"],
+        "company": cu.get("company", ""),
+        "company_number": cu.get("company_number", ""),
+        "address": cu.get("address", ""),
+        "title": ct.get("title", ""),
+        "status": ct.get("status", "draft"),
+        "effective_date": ct.get("effective_date", ""),
+        "term_months": ct.get("term_months", ""),
+        "auto_renew": ct.get("auto_renew", False),
+        "payment_terms": ct.get("payment_terms", ""),
+        "currency": ct.get("currency", "GBP"),
+        "governing_law": ct.get("governing_law", ""),
+        "jurisdiction": ct.get("jurisdiction", ""),
+        "notice_period_days": ct.get("notice_period_days", ""),
+    }
+
+    lines = sorted(
+        [ln for ln in crm.get("contract_lines", []) if ln["contract_id"] == contract_id],
+        key=lambda l: l.get("seq", 0),
     )
-    clauses = dsql_rows(
-        f"SELECT seq, heading, body FROM contract_clauses "
-        f"WHERE contract_id = '{esc(contract_id)}' ORDER BY seq"
+    clauses = sorted(
+        [cl for cl in crm.get("contract_clauses", []) if cl["contract_id"] == contract_id],
+        key=lambda cl: cl.get("seq", 0),
     )
 
     md = []
@@ -487,7 +547,7 @@ def contract_markdown(contract_id):
 
     status_label = c['status'].upper()
     if status_label == "DRAFT":
-        md.append("**⚠ DRAFT — NOT YET EXECUTED**\n")
+        md.append("**\u26a0 DRAFT \u2014 NOT YET EXECUTED**\n")
 
     md.append("---\n")
 
@@ -510,14 +570,14 @@ def contract_markdown(contract_id):
         md.append(f"| Effective Date | {c['effective_date']} |")
     if c.get("term_months"):
         md.append(f"| Term | {c['term_months']} months |")
-    auto = "Yes" if c.get("auto_renew") in ("1", "true", "True", True) else "No"
+    auto = "Yes" if c.get("auto_renew") in (True, "true", "True", "1") else "No"
     md.append(f"| Auto-Renewal | {auto} |")
-    md.append(f"| Payment Terms | {c.get('payment_terms', 'net-30')} |")
-    md.append(f"| Currency | {c.get('currency', 'GBP')} |")
+    md.append(f"| Payment Terms | {c.get('payment_terms') or 'net-30'} |")
+    md.append(f"| Currency | {c.get('currency') or 'GBP'} |")
     if c.get("notice_period_days"):
         md.append(f"| Notice Period | {c['notice_period_days']} days |")
-    md.append(f"| Governing Law | {c.get('governing_law', 'England and Wales')} |")
-    md.append(f"| Jurisdiction | {c.get('jurisdiction', 'Courts of England and Wales')} |")
+    md.append(f"| Governing Law | {c.get('governing_law') or 'England and Wales'} |")
+    md.append(f"| Jurisdiction | {c.get('jurisdiction') or 'Courts of England and Wales'} |")
     md.append("")
 
     # Service Lines
@@ -527,12 +587,12 @@ def contract_markdown(contract_id):
         md.append("|---|-------------|-----|------------|-----------|")
         total_annual = 0
         for ln in lines:
-            qty = float(ln["quantity"])
+            qty = float(ln.get("quantity", 1))
             price = float(ln["unit_price"])
-            freq = ln["frequency"]
+            freq = ln.get("frequency", "monthly")
             md.append(
-                f"| {ln['seq']} | {ln['description']} | {qty:g} "
-                f"| £{price:,.2f} | {freq} |"
+                f"| {ln['seq']} | {ln.get('description', '')} | {qty:g} "
+                f"| \u00a3{price:,.2f} | {freq} |"
             )
             if freq == "monthly":
                 total_annual += qty * price * 12
@@ -544,13 +604,13 @@ def contract_markdown(contract_id):
                 total_annual += qty * price  # show as-is
 
         md.append("")
-        md.append(f"**Total annual value: £{total_annual:,.2f}**\n")
+        md.append(f"**Total annual value: \u00a3{total_annual:,.2f}**\n")
 
     # Clauses
     if clauses:
         for cl in clauses:
-            md.append(f"## {cl['seq']}. {cl['heading']}\n")
-            md.append(f"{cl['body']}\n")
+            md.append(f"## {cl['seq']}. {cl.get('heading', '')}\n")
+            md.append(f"{cl.get('body', '')}\n")
 
     # Signature blocks
     md.append("---\n")

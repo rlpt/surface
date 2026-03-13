@@ -1,8 +1,8 @@
 # CRM Module — LLM Context
 
-Customer contract management stored in Dolt. Define commercial relationships as structured data, output legal documents as PDF.
+Customer contract management stored in `data/crm.toml`. Uses `datalib` for loading, saving, and computed views.
 
-## Tables
+## Data keys in crm.toml
 
 - `customers` — counterparties (id, company, company_number, address, notes, created_at)
 - `contacts` — people at customers (id, customer_id, name, email, role, notes, created_at)
@@ -10,10 +10,10 @@ Customer contract management stored in Dolt. Define commercial relationships as 
 - `contract_lines` — commercial line items (contract_id, seq, description, quantity, unit_price, frequency)
 - `contract_clauses` — legal terms (contract_id, seq, heading, body)
 
-## Views
+## Computed views (via datalib)
 
-- `contract_summary` — contracts with MRR calculation, line/clause counts
-- `renewals_due` — active contracts expiring within 90 days
+- `datalib.contract_summary()` — contracts with MRR calculation, line/clause counts
+- `datalib.renewals_due()` — active contracts expiring within 90 days
 
 ## Statuses
 
@@ -21,35 +21,18 @@ Contract: `draft` → `active` → `expired` | `terminated`
 
 Line frequency: `monthly`, `quarterly`, `annual`, `one-off`
 
-## Workflow: onboard a new customer and create a contract
+## Workflow: onboard a new customer
 
 ```bash
-# 1. Add the customer
 crm add acme "Acme Corp" 12345678
-
-# 2. Add a contact
 crm contact acme "Jane Smith" "jane@acme.com" "Head of Ops"
-
-# 3. Create a draft contract
 crm new acme "SaaS Subscription Agreement"
-
-# 4. Set commercial terms
 crm set ct-acme-1 effective-date 2026-04-01
 crm set ct-acme-1 term 12
 crm set ct-acme-1 auto-renew true
-crm set ct-acme-1 payment-terms net-30
-
-# 5. Add service lines
-crm line ct-acme-1 1 "Platform licence — Standard plan" 200 monthly
-crm line ct-acme-1 2 "Onboarding & training" 1500 one-off
-
-# 6. Add standard legal clauses
+crm line ct-acme-1 1 "Platform licence" 200 monthly
 crm standard-clauses ct-acme-1
-
-# 7. Generate contract PDF
 crm pdf ct-acme-1
-
-# 8. Once signed, activate
 crm activate ct-acme-1
 ```
 
@@ -57,29 +40,29 @@ crm activate ct-acme-1
 
 Read:
 - `crm customers` — list all customers
-- `crm customer <customer-id>` — customer detail (contacts, contracts)
+- `crm customer <id>` — customer detail
 - `crm contracts [active|draft]` — list contracts
-- `crm contract <contract-id>` — contract detail (terms, lines, clauses)
+- `crm contract <id>` — contract detail
 - `crm renewals` — contracts expiring within 90 days
-- `crm find <term>` — search customers by name
+- `crm find <term>` — search customers
 
 Write:
 - `crm add <id> "Company" [company-number]` — add a customer
 - `crm contact <customer-id> "Name" "email" [role]` — add a contact
-- `crm new <customer-id> "Contract Title"` — create a draft contract
-- `crm line <contract-id> <seq> "desc" <price> [frequency]` — add a line item
-- `crm clause <contract-id> <seq> "heading" "body"` — add a custom clause
-- `crm standard-clauses <contract-id>` — add standard legal clauses (12 clauses)
+- `crm new <customer-id> "Title"` — create a draft contract
+- `crm line <contract-id> <seq> "desc" <price> [frequency]` — add a line
+- `crm clause <contract-id> <seq> "heading" "body"` — add a clause
+- `crm standard-clauses <contract-id>` — add 12 standard clauses
 - `crm set <contract-id> <field> <value>` — set contract field
 - `crm activate <contract-id>` — mark contract as active
 
 Output:
-- `crm pdf <contract-id>` — generate contract PDF (→ downloads/)
+- `crm pdf <contract-id>` — generate contract PDF
 
 ## Standard Clauses
 
-`crm standard-clauses` adds 12 boilerplate clauses: Definitions, Services, Fees and Payment, Term and Renewal, Termination, Intellectual Property, Confidentiality, Data Protection, Limitation of Liability, Force Majeure, General, Governing Law and Jurisdiction. These can be customised per contract by updating the clause body via `data sql`.
+`crm standard-clauses` adds 12 clauses: Definitions, Services, Fees and Payment, Term and Renewal, Termination, IP, Confidentiality, Data Protection, Limitation of Liability, Force Majeure, General, Governing Law.
 
 ## Set Fields
 
-Allowed fields for `crm set`: effective-date, term, auto-renew, payment-terms, currency, governing-law, jurisdiction, notice-period, status, notes.
+Allowed: effective-date, term, auto-renew, payment-terms, currency, governing-law, jurisdiction, notice-period, status, notes.

@@ -1,8 +1,8 @@
 # Shares Module — LLM Context
 
-Share allocation tracking stored in Dolt. Data lives in the `share_classes`, `holders`, `share_events`, `pools`, and `pool_members` tables.
+Share allocation tracking stored in `data/shares.toml`. Uses `datalib` for loading, saving, and computed views.
 
-## Tables
+## Data keys in shares.toml
 
 - `share_classes` — class definitions (name, nominal_value, nominal_currency, authorised)
 - `holders` — shareholder declarations (id, display_name)
@@ -10,23 +10,17 @@ Share allocation tracking stored in Dolt. Data lives in the `share_classes`, `ho
 - `pools` — pool budgets (name, share_class, budget)
 - `pool_members` — pool membership (pool_name, holder_id)
 
-## Views
+## Computed views (via datalib)
 
-- `holdings` — computed current holdings per holder/class
-- `cap_table` — full cap table with percentages
-- `class_availability` — issued vs authorised per class
+- `datalib.holdings()` — current holdings per holder/class
+- `datalib.cap_table()` — full cap table with percentages
+- `datalib.class_availability()` — issued vs authorised per class
 
 ## Workflow: granting shares
 
 ```bash
 shares add-holder alice "Alice Smith"      # add holder if new
-shares grant alice ordinary 500            # grant + validate + dolt commit
-```
-
-Or with vesting (use SQL directly):
-```sql
-data sql "INSERT INTO share_events (event_date, event_type, holder_id, share_class, quantity, vesting_start, vesting_months, vesting_cliff_months)
-  VALUES ('2026-03-09', 'grant', 'alice', 'ordinary', 500, '2026-03-09', 48, 12);"
+shares grant alice ordinary 500            # grant + validate + git commit
 ```
 
 ## Workflow: transferring shares
@@ -45,8 +39,6 @@ Requires two env vars:
 shares push all          # push all tabs (Cap Table, History, Holders, Pools)
 shares push table        # push just the cap table
 ```
-
-The service account must have Editor access to the spreadsheet.
 
 ## Commands
 

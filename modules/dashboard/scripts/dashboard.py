@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Generate a read-only HTML dashboard from Dolt data."""
+"""Generate a read-only HTML dashboard from TOML data via datalib."""
 
-import csv
 import http.server
-import io
 import os
-import subprocess
 import sys
 from datetime import date
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../data/scripts"))
+import datalib
+
 SURFACE_ROOT = os.environ.get("SURFACE_ROOT", ".")
-SURFACE_DB = os.environ.get("SURFACE_DB", os.path.join(SURFACE_ROOT, ".surface-db"))
 
 COLORS = {
     "primary": os.environ.get("BRAND_PRIMARY", "#6366f1"),
@@ -23,34 +22,6 @@ COLORS = {
 def die(msg):
     print(f"error: {msg}", file=sys.stderr)
     sys.exit(1)
-
-
-def check_db():
-    if not os.path.isdir(os.path.join(SURFACE_DB, ".dolt")):
-        die("database not initialised — run 'data init'")
-
-
-def query_rows(sql):
-    """Run a Dolt SQL query and return list of dicts."""
-    check_db()
-    r = subprocess.run(
-        ["dolt", "sql", "-r", "csv", "-q", sql],
-        cwd=SURFACE_DB,
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0:
-        return []
-    reader = csv.DictReader(io.StringIO(r.stdout))
-    return list(reader)
-
-
-def query_val(sql):
-    """Run a query and return a single scalar value."""
-    rows = query_rows(sql)
-    if not rows:
-        return ""
-    return list(rows[0].values())[0]
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +218,7 @@ footer {{
 <h1>{esc(title)}</h1>
 {body}
 </main>
-<footer>Generated {date.today().isoformat()} from Dolt</footer>
+<footer>Generated {date.today().isoformat()} from data/</footer>
 </body>
 </html>"""
 
@@ -257,116 +228,203 @@ footer {{
 # ---------------------------------------------------------------------------
 
 def build_index():
-    holders = query_val("SELECT COUNT(*) FROM holders")
-    shares_issued = query_val(
-        "SELECT COALESCE(SUM(shares_held), 0) FROM holdings"
-    )
-    customers = query_val("SELECT COUNT(*) FROM customers")
-    mrr = query_val(
-        "SELECT COALESCE(SUM(mrr_gbp), 0) FROM customers WHERE status = 'active'"
-    )
-    open_deals = query_val(
-        "SELECT COUNT(*) FROM deals WHERE stage NOT IN ('closed-won', 'closed-lost')"
-    )
-    contacts = query_val("SELECT COUNT(*) FROM contacts")
-    accounts = query_val("SELECT COUNT(*) FROM accounts")
-    txns = query_val("SELECT COUNT(*) FROM transactions")
+    shares_data = datalib.load("shares")
+    acct_data = datalib.load("accounts")
+    crm_data = datalib.load("crm")
+
+    # Shares metrics
+    h = datalib.holdings(shares_data)
+    holder_ids = set(r["holder_id"] for r in h)
+    holders = len(holder_ids)
+    shares_issued = sum(r["shares_held"] for r in h)
+
+    # CRM metrics
+    customers = len(crm_data.get("customers", []))
+    contracts = len(crm_data.get("contracts", []))
+    contacts = len(crm_data.get("contacts", []))
+
+    # MRR from active contracts
+    summaries = datalib.contract_summary(crm_data)
+    mrr = sum(s["mrr"] for s in summaries if s["status"] == "active")
+    mrr = round(mrr, 2)
+
+    # Accounts metrics
+    num_accounts = len(acct_data.get("accounts", []))
+    num_txns = len(acct_data.get("transactions", []))
 
     cards = f"""
-<p class="subtitle">Company snapshot — read-only view of all Dolt data</p>
+<p class="subtitle">Company snapshot — read-only view of all company data</p>
 <div class="cards">
   <div class="card"><div class="label">Shareholders</div><div class="value">{esc(holders)}</div></div>
   <div class="card"><div class="label">Shares Issued</div><div class="value">{esc(shares_issued)}</div></div>
   <div class="card"><div class="label">Customers</div><div class="value">{esc(customers)}</div></div>
   <div class="card"><div class="label">Monthly Revenue</div><div class="value">&pound;{esc(mrr)}</div></div>
-  <div class="card"><div class="label">Open Deals</div><div class="value">{esc(open_deals)}</div></div>
+  <div class="card"><div class="label">Contracts</div><div class="value">{esc(contracts)}</div></div>
   <div class="card"><div class="label">Contacts</div><div class="value">{esc(contacts)}</div></div>
-  <div class="card"><div class="label">Accounts</div><div class="value">{esc(accounts)}</div></div>
-  <div class="card"><div class="label">Transactions</div><div class="value">{esc(txns)}</div></div>
+  <div class="card"><div class="label">Accounts</div><div class="value">{esc(num_accounts)}</div></div>
+  <div class="card"><div class="label">Transactions</div><div class="value">{esc(num_txns)}</div></div>
 </div>
 """
 
-    renewals = query_rows(
-        "SELECT company, pricing_plan AS plan, status, mrr, days_left "
-        "FROM renewals_due ORDER BY days_left LIMIT 5"
-    )
-    stale = query_rows(
-        "SELECT company, name, stage, last_contacted, next_action "
-        "FROM stale_contacts LIMIT 5"
-    )
+    renewals = datalib.renewals_due(crm_data)
+    renewals_display = [
+        {
+            "company": r["company"],
+            "title": r["title"],
+            "status": r["status"],
+            "auto_renew": r["auto_renew"],
+            "expiry_date": r["expiry_date"],
+            "days_left": r["days_left"],
+        }
+        for r in renewals[:5]
+    ]
 
     body = cards
-    body += "<h2>Upcoming Renewals</h2>\n" + html_table(renewals)
-    body += "<h2>Stale Contacts</h2>\n" + html_table(stale)
+    body += "<h2>Upcoming Renewals</h2>\n" + html_table(renewals_display)
     return page("Overview", body, "index")
 
 
 def build_cap_table():
-    cap = query_rows("SELECT holder, class, held, pct FROM cap_table")
-    classes = query_rows(
-        "SELECT class, authorised, issued, available FROM class_availability"
-    )
-    pools = query_rows(
-        "SELECT p.name, p.share_class AS class, p.budget, "
-        "GROUP_CONCAT(pm.holder_id) AS members "
-        "FROM pools p LEFT JOIN pool_members pm ON pm.pool_name = p.name "
-        "GROUP BY p.name, p.share_class, p.budget"
-    )
-    events = query_rows(
-        "SELECT event_date, event_type, holder_id, share_class, quantity "
-        "FROM share_events ORDER BY event_date, id"
-    )
+    shares_data = datalib.load("shares")
+
+    cap = datalib.cap_table(shares_data)
+    cap_display = [
+        {"holder": r["holder"], "class": r["class"], "held": r["held"], "pct": r["pct"]}
+        for r in cap
+    ]
+
+    classes = datalib.class_availability(shares_data)
+    classes_display = [
+        {"class": r["class"], "authorised": r["authorised"], "issued": r["issued"], "available": r["available"]}
+        for r in classes
+    ]
+
+    # Pools with members
+    pools_raw = shares_data.get("pools", [])
+    pool_members_raw = shares_data.get("pool_members", [])
+    members_by_pool = {}
+    for pm in pool_members_raw:
+        members_by_pool.setdefault(pm["pool_name"], []).append(pm["holder_id"])
+    pools_display = [
+        {
+            "name": p["name"],
+            "class": p["share_class"],
+            "budget": p["budget"],
+            "members": ", ".join(members_by_pool.get(p["name"], [])),
+        }
+        for p in pools_raw
+    ]
+
+    # Share events
+    events_raw = shares_data.get("share_events", [])
+    events_display = [
+        {
+            "event_date": e["event_date"],
+            "event_type": e["event_type"],
+            "holder_id": e["holder_id"],
+            "share_class": e["share_class"],
+            "quantity": e["quantity"],
+        }
+        for e in sorted(events_raw, key=lambda e: (str(e.get("event_date", "")), e.get("id", 0)))
+    ]
 
     body = '<p class="subtitle">Shareholdings, classes, pools, and event history</p>'
-    body += "<h2>Holdings</h2>\n" + html_table(cap)
-    body += "<h2>Share Classes</h2>\n" + html_table(classes)
-    body += "<h2>Pools</h2>\n" + html_table(pools)
-    body += "<h2>Event History</h2>\n" + html_table(events)
+    body += "<h2>Holdings</h2>\n" + html_table(cap_display)
+    body += "<h2>Share Classes</h2>\n" + html_table(classes_display)
+    body += "<h2>Pools</h2>\n" + html_table(pools_display)
+    body += "<h2>Event History</h2>\n" + html_table(events_display)
     return page("Cap Table", body, "cap-table")
 
 
 def build_accounts():
-    balances = query_rows(
-        "SELECT account_path, account_type, balance, currency "
-        "FROM account_balances ORDER BY account_type, account_path"
-    )
-    recent_txns = query_rows(
-        "SELECT t.txn_date, t.payee, t.description, "
-        "p.account_path, p.amount, p.currency "
-        "FROM transactions t "
-        "JOIN postings p ON p.txn_id = t.id "
-        "ORDER BY t.txn_date DESC, t.id DESC LIMIT 30"
-    )
+    acct_data = datalib.load("accounts")
+
+    balances = datalib.account_balances(acct_data)
+    balances_display = [
+        {
+            "account_path": r["account_path"],
+            "account_type": r["account_type"],
+            "balance": r["balance"],
+            "currency": r["currency"],
+        }
+        for r in balances
+    ]
+
+    # Recent transactions with their postings
+    txns = acct_data.get("transactions", [])
+    postings = acct_data.get("postings", [])
+    postings_by_txn = {}
+    for p in postings:
+        postings_by_txn.setdefault(p["txn_id"], []).append(p)
+
+    recent_txns = sorted(txns, key=lambda t: (str(t.get("txn_date", "")), t.get("id", 0)), reverse=True)
+    recent_display = []
+    for t in recent_txns[:30]:
+        for p in postings_by_txn.get(t["id"], []):
+            recent_display.append({
+                "txn_date": t.get("txn_date", ""),
+                "payee": t.get("payee", ""),
+                "description": t.get("description", ""),
+                "account_path": p["account_path"],
+                "amount": p["amount"],
+                "currency": p.get("currency", "GBP"),
+            })
 
     body = '<p class="subtitle">Double-entry bookkeeping — balances and transactions</p>'
-    body += "<h2>Account Balances</h2>\n" + html_table(balances)
-    body += "<h2>Recent Transactions</h2>\n" + html_table(recent_txns)
+    body += "<h2>Account Balances</h2>\n" + html_table(balances_display)
+    body += "<h2>Recent Transactions</h2>\n" + html_table(recent_display)
     return page("Accounts", body, "accounts")
 
 
 def build_crm():
-    overview = query_rows(
-        "SELECT company, pricing_plan, status, mrr, contract_end, contacts, won_value "
-        "FROM customer_overview ORDER BY company"
-    )
-    pipeline = query_rows("SELECT stage, deals, total_value, companies FROM pipeline")
-    contacts = query_rows(
-        "SELECT c.company, c.name, c.role, c.contact_role, c.stage, "
-        "c.last_contacted, c.next_action_date, c.next_action "
-        "FROM contacts c ORDER BY c.company, c.name"
-    )
-    deals = query_rows(
-        "SELECT d.title, c.company, d.stage, d.value_gbp AS value, "
-        "d.recurring, d.opened_date, d.closed_date "
-        "FROM deals d JOIN contacts c ON c.id = d.contact_id "
-        "ORDER BY d.opened_date DESC"
-    )
+    crm_data = datalib.load("crm")
 
-    body = '<p class="subtitle">Customers, contacts, deals, and pipeline</p>'
-    body += "<h2>Customers</h2>\n" + html_table(overview)
-    body += "<h2>Pipeline</h2>\n" + html_table(pipeline)
-    body += "<h2>Contacts</h2>\n" + html_table(contacts)
-    body += "<h2>Deals</h2>\n" + html_table(deals)
+    # Contract overview
+    summaries = datalib.contract_summary(crm_data)
+    overview_display = [
+        {
+            "company": s["company"],
+            "title": s["title"],
+            "status": s["status"],
+            "mrr": s["mrr"],
+            "effective_date": s["effective_date"],
+            "term_months": s["term_months"],
+            "auto_renew": s["auto_renew"],
+            "line_count": s["line_count"],
+        }
+        for s in summaries
+    ]
+
+    # Contacts
+    contacts_raw = crm_data.get("contacts", [])
+    customers_map = {c["id"]: c["company"] for c in crm_data.get("customers", [])}
+    contacts_display = [
+        {
+            "company": customers_map.get(c.get("customer_id", ""), c.get("customer_id", "")),
+            "name": c.get("name", ""),
+            "role": c.get("role", ""),
+            "email": c.get("email", ""),
+        }
+        for c in sorted(contacts_raw, key=lambda c: (customers_map.get(c.get("customer_id", ""), ""), c.get("name", "")))
+    ]
+
+    # Renewals
+    renewals = datalib.renewals_due(crm_data)
+    renewals_display = [
+        {
+            "company": r["company"],
+            "title": r["title"],
+            "auto_renew": r["auto_renew"],
+            "expiry_date": r["expiry_date"],
+            "days_left": r["days_left"],
+        }
+        for r in renewals
+    ]
+
+    body = '<p class="subtitle">Customers, contracts, contacts, and renewals</p>'
+    body += "<h2>Contracts</h2>\n" + html_table(overview_display)
+    body += "<h2>Contacts</h2>\n" + html_table(contacts_display)
+    body += "<h2>Upcoming Renewals</h2>\n" + html_table(renewals_display)
     return page("CRM", body, "crm")
 
 

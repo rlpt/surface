@@ -1,39 +1,48 @@
 # Accounts Module — LLM Context
 
-Double-entry bookkeeping stored in Dolt. Data lives in the `accounts`, `transactions`, and `postings` tables.
+Double-entry bookkeeping stored in `data/accounts.toml`. Uses `datalib` for loading and computed views.
 
-## Tables
+## Data keys in accounts.toml
 
 - `accounts` — chart of accounts (path, account_type)
-- `transactions` — transaction headers (txn_date, payee, description)
+- `transactions` — transaction headers (id, txn_date, payee, description)
 - `postings` — line items (txn_id, account_path, amount, currency)
 
-## Views
+## Computed views (via datalib)
 
-- `account_balances` — aggregated balances per account
+- `datalib.account_balances()` — aggregated balances per account
 
 ## Workflow: adding a transaction
 
-1. Check valid accounts: `data sql "SELECT path FROM accounts ORDER BY path;"`
-2. Insert the transaction:
-   ```sql
-   INSERT INTO transactions (txn_date, payee, description)
-     VALUES ('2026-03-09', 'AWS', 'Monthly hosting');
-   INSERT INTO postings (txn_id, account_path, amount)
-     VALUES (LAST_INSERT_ID(), 'expenses:infra:hosting', 45.00);
-   INSERT INTO postings (txn_id, account_path, amount)
-     VALUES (LAST_INSERT_ID(), 'assets:bank:tide', -45.00);
-   ```
-3. Validate: `accounts check`
-4. Commit: `data commit -m "add AWS hosting payment"`
+Edit `data/accounts.toml` directly:
+
+```toml
+[[transactions]]
+id = 1
+txn_date = "2026-03-09"
+payee = "AWS"
+description = "Monthly hosting"
+
+[[postings]]
+txn_id = 1
+account_path = "expenses:infra:hosting"
+amount = 45.00
+currency = "GBP"
+
+[[postings]]
+txn_id = 1
+account_path = "assets:bank:tide"
+amount = -45.00
+currency = "GBP"
+```
+
+Then validate and commit:
+```bash
+accounts check
+git add data/ && git commit -m "add AWS hosting payment"
+```
 
 Postings must sum to zero per transaction (double-entry). Positive = debit, negative = credit.
-
-## Workflow: adding an account
-
-```sql
-INSERT INTO accounts (path, account_type) VALUES ('expenses:marketing:ads', 'expenses');
-```
 
 ## Common commands
 
@@ -59,5 +68,3 @@ expenses:payroll:{salary,pension}
 revenue:{sales,consulting}
 equity:opening-balances
 ```
-
-New accounts: INSERT into `accounts` table, then use in postings.
