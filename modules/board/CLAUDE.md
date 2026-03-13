@@ -58,4 +58,7 @@ Write:
 
 Output:
 - `board html [dir]` — generate HTML board pack (default: out/board/)
+- `board pdf pack` — full board pack as PDF (→ downloads/)
+- `board pdf meeting <id>` — single meeting as PDF (→ downloads/)
+- `board pdf resolutions` — all resolutions as PDF (→ downloads/)
 - `board serve [dir]` — build and serve on localhost:8001

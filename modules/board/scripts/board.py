@@ -11,6 +11,7 @@ from datetime import date
 
 SURFACE_ROOT = os.environ.get("SURFACE_ROOT", ".")
 SURFACE_DB = os.environ.get("SURFACE_DB", os.path.join(SURFACE_ROOT, ".surface-db"))
+DOWNLOADS_DIR = os.path.join(SURFACE_ROOT, "downloads")
 
 COLORS = {
     "primary": os.environ.get("BRAND_PRIMARY", "#6366f1"),
@@ -664,6 +665,169 @@ def cmd_serve(args):
         print("\nstopped")
 
 
+# ---------------------------------------------------------------------------
+# PDF output
+# ---------------------------------------------------------------------------
+
+def generate_pdf(output_file, markdown):
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    subprocess.run(
+        [
+            "pandoc",
+            "--pdf-engine=typst",
+            "-V", "mainfont=Helvetica",
+            "-V", "margin-top=2cm",
+            "-V", "margin-bottom=2cm",
+            "-V", "margin-left=2cm",
+            "-V", "margin-right=2cm",
+            "-o", output_file,
+        ],
+        input=markdown,
+        text=True,
+        check=True,
+    )
+    print(output_file)
+
+
+def meeting_markdown(meeting_id):
+    """Build markdown for a single meeting."""
+    info = dsql_rows(
+        f"SELECT id, meeting_date, title, location, status, called_by "
+        f"FROM board_meetings WHERE id = '{meeting_id}'"
+    )
+    if not info:
+        return None
+    m = info[0]
+
+    lines = [f"# {m['title']}\n"]
+    lines.append(f"**Date:** {m['meeting_date']}")
+    lines.append(f"**Status:** {m['status']}")
+    if m.get("location"):
+        lines.append(f"**Location:** {m['location']}")
+    if m.get("called_by"):
+        lines.append(f"**Called by:** {m['called_by']}")
+    lines.append("")
+
+    attendees = dsql_rows(
+        f"SELECT person_name, role FROM board_attendees "
+        f"WHERE meeting_id = '{meeting_id}' ORDER BY role, person_name"
+    )
+    if attendees:
+        lines.append("## Attendees\n")
+        lines.append("| Name | Role |")
+        lines.append("|------|------|")
+        for a in attendees:
+            lines.append(f"| {a['person_name']} | {a.get('role', '')} |")
+        lines.append("")
+
+    minutes = dsql_rows(
+        f"SELECT seq, item_text FROM board_minutes "
+        f"WHERE meeting_id = '{meeting_id}' ORDER BY seq"
+    )
+    if minutes:
+        lines.append("## Minutes\n")
+        for mi in minutes:
+            lines.append(f"{mi['seq']}. {mi['item_text']}\n")
+
+    resolutions = dsql_rows(
+        f"SELECT id, resolution_text, status, proposed_by, voted_date "
+        f"FROM board_resolutions WHERE meeting_id = '{meeting_id}' ORDER BY id"
+    )
+    if resolutions:
+        lines.append("## Resolutions\n")
+        lines.append("| ID | Resolution | Status | Proposed by | Voted |")
+        lines.append("|----|------------|--------|-------------|-------|")
+        for r in resolutions:
+            lines.append(
+                f"| {r['id']} | {r['resolution_text']} "
+                f"| {r['status'].upper()} "
+                f"| {r.get('proposed_by', '')} "
+                f"| {r.get('voted_date', '')} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def cmd_pdf_meeting(meeting_id):
+    if not meeting_id:
+        die("usage: board pdf meeting <meeting-id>")
+    md = meeting_markdown(meeting_id)
+    if md is None:
+        die(f"meeting '{meeting_id}' not found")
+    today = date.today().isoformat()
+    output = os.path.join(DOWNLOADS_DIR, f"{meeting_id}-{today}.pdf")
+    generate_pdf(output, md)
+
+
+def cmd_pdf_resolutions():
+    today = date.today().isoformat()
+    output = os.path.join(DOWNLOADS_DIR, f"board-resolutions-{today}.pdf")
+
+    rows = dsql_rows(
+        "SELECT r.id, m.meeting_date, r.resolution_text, r.status, "
+        "r.proposed_by, r.voted_date "
+        "FROM board_resolutions r "
+        "JOIN board_meetings m ON m.id = r.meeting_id "
+        "ORDER BY m.meeting_date DESC, r.id"
+    )
+
+    lines = [f"# Board Resolutions\n", f"Generated: {today}\n"]
+    if not rows:
+        lines.append("No resolutions recorded.")
+    else:
+        lines.append("| ID | Date | Resolution | Status | Proposed by | Voted |")
+        lines.append("|----|------|------------|--------|-------------|-------|")
+        for r in rows:
+            lines.append(
+                f"| {r['id']} | {r['meeting_date']} "
+                f"| {r['resolution_text']} | {r['status'].upper()} "
+                f"| {r.get('proposed_by', '')} "
+                f"| {r.get('voted_date', '')} |"
+            )
+
+    generate_pdf(output, "\n".join(lines))
+
+
+def cmd_pdf_pack():
+    today = date.today().isoformat()
+    output = os.path.join(DOWNLOADS_DIR, f"board-pack-{today}.pdf")
+
+    meetings = dsql_rows(
+        "SELECT id FROM board_meetings ORDER BY meeting_date DESC"
+    )
+
+    sections = [f"# Board Pack\n", f"Generated: {today}\n"]
+
+    # Summary
+    total = dsql_val("SELECT COUNT(*) FROM board_meetings")
+    passed = dsql_val("SELECT COUNT(*) FROM board_resolutions WHERE status = 'passed'")
+    pending = dsql_val("SELECT COUNT(*) FROM board_resolutions WHERE status = 'pending'")
+    sections.append(f"**Meetings:** {total} | **Resolutions passed:** {passed} | **Pending:** {pending}\n")
+    sections.append("---\n")
+
+    for m in meetings:
+        md = meeting_markdown(m["id"])
+        if md:
+            sections.append(md)
+            sections.append("---\n")
+
+    generate_pdf(output, "\n".join(sections))
+
+
+def cmd_pdf(args):
+    subcmd = args[0] if args else ""
+    match subcmd:
+        case "meeting":
+            cmd_pdf_meeting(args[1] if len(args) > 1 else "")
+        case "resolutions":
+            cmd_pdf_resolutions()
+        case "pack":
+            cmd_pdf_pack()
+        case _:
+            print("Usage: board pdf <pack|meeting <id>|resolutions>")
+
+
 def cmd_help():
     with open(
         os.path.join(SURFACE_ROOT, "modules/board/scripts/help.txt")
@@ -690,6 +854,8 @@ def main():
             cmd_minutes(args[1])
         case "html":
             cmd_html(args[1:])
+        case "pdf":
+            cmd_pdf(args[1:])
         case "serve":
             cmd_serve(args[1:])
         case "new":

@@ -4,6 +4,9 @@ board (meetings, minutes, resolutions — dolt):
   board resolutions [pending|passed|all]     List resolutions (default: all)
   board minutes <meeting-id>                 Show minutes for a meeting
   board html [dir]                           Generate HTML board pack (default: out/board)
+  board pdf pack                             Full board pack as PDF (→ downloads/)
+  board pdf meeting <meeting-id>             Single meeting as PDF (→ downloads/)
+  board pdf resolutions                      All resolutions as PDF (→ downloads/)
   board serve [dir]                          Build and serve on localhost:8001
   board new <date> <title>                   Create a new meeting
   board attend <meeting-id> <person> [role]  Add attendee (role: chair, secretary, director, observer)
