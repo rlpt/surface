@@ -57,6 +57,7 @@
         basePackages = [
           pkgs.git
           pkgs.jq
+          pkgs.dolt
           halp
           whoami-surface
           onboard
