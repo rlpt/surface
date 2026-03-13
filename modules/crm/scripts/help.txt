@@ -1,6 +1,9 @@
-CRM (contacts, deals, pipeline — dolt):
+CRM (contacts, deals, customers, pipeline — dolt):
   crm pipeline                               Pipeline overview
   crm contacts [active]                      List contacts (or active only)
+  crm customers [active|all]                 List customer organisations
+  crm customer <customer-id>                 Customer detail (contacts, deals, activity)
+  crm renewals                               Renewals due in next 90 days
   crm stale                                  Contacts not contacted in 14+ days
   crm find <term>                            Search by company/name/tag
   crm log <contact-id> "summary"             Log an interaction

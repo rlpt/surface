@@ -245,6 +245,20 @@ def cmd_digest():
         )
     print()
 
+    print("## Customers")
+    cust_count = dsql_val(
+        "SELECT COUNT(*) FROM customers WHERE status IN ('active', 'onboarding');"
+    )
+    mrr = dsql_val(
+        "SELECT COALESCE(SUM(mrr_gbp), 0) FROM customers "
+        "WHERE status IN ('active', 'onboarding');"
+    )
+    print(f"Active customers: {cust_count} — MRR: £{mrr}")
+    renewal_count = dsql_val("SELECT COUNT(*) FROM renewals_due;")
+    if renewal_count != "0":
+        dsql("SELECT * FROM renewals_due;")
+    print()
+
     print("## Recent Activity (7 days)")
     recent_count = dsql_val(
         "SELECT COUNT(*) FROM interactions "
@@ -299,15 +313,97 @@ def cmd_forecast():
     print(f"\nClosed-won to date: £{won}")
 
 
+def cmd_customers(filter_=""):
+    if filter_ == "active":
+        dsql(
+            "SELECT id, company, pricing_plan, mrr, contract_end, contacts "
+            "FROM customer_overview WHERE status = 'active' "
+            "ORDER BY mrr DESC;"
+        )
+    elif filter_ == "all":
+        dsql("SELECT * FROM customer_overview ORDER BY status, company;")
+    else:
+        dsql(
+            "SELECT id, company, pricing_plan, status, mrr, contract_end, contacts "
+            "FROM customer_overview ORDER BY status, company;"
+        )
+
+    total = dsql_val(
+        "SELECT COALESCE(SUM(mrr_gbp), 0) FROM customers "
+        "WHERE status IN ('active', 'onboarding');"
+    )
+    count = dsql_val(
+        "SELECT COUNT(*) FROM customers WHERE status IN ('active', 'onboarding');"
+    )
+    print(f"\n{count} active customers — MRR: £{total}")
+
+
+def cmd_customer(cust_id):
+    if not cust_id:
+        die("usage: crm customer <customer-id>")
+
+    company = dsql_val(f"SELECT company FROM customers WHERE id = '{cust_id}';")
+    if not company:
+        die(f"unknown customer: {cust_id}")
+
+    print(f"# {company}\n")
+    dsql(
+        "SELECT id, company, pricing_plan, status, mrr_gbp AS mrr, "
+        "contract_start, contract_end, instance_id, notes "
+        f"FROM customers WHERE id = '{cust_id}';"
+    )
+
+    print("\n## Contacts")
+    dsql(
+        "SELECT id, name, email, role, contact_role "
+        f"FROM contacts WHERE customer_id = '{cust_id}' ORDER BY contact_role, name;"
+    )
+
+    print("\n## Deals")
+    dsql(
+        "SELECT d.id, d.title, d.stage, d.value_gbp AS value, d.recurring "
+        "FROM deals d JOIN contacts c ON c.id = d.contact_id "
+        f"WHERE c.customer_id = '{cust_id}' ORDER BY d.opened_date DESC;"
+    )
+
+    print("\n## Recent Interactions")
+    dsql(
+        "SELECT i.interaction_date AS date, c.name, i.channel, i.summary "
+        "FROM interactions i "
+        "JOIN contacts c ON c.id = i.contact_id "
+        f"WHERE c.customer_id = '{cust_id}' "
+        "ORDER BY i.interaction_date DESC LIMIT 10;"
+    )
+
+
+def cmd_renewals():
+    count = dsql_val("SELECT COUNT(*) FROM renewals_due;")
+    if count == "0":
+        print("No renewals due in the next 90 days.")
+        return
+
+    dsql("SELECT * FROM renewals_due;")
+    total = dsql_val(
+        "SELECT COALESCE(SUM(mrr_gbp), 0) FROM customers "
+        "WHERE status IN ('active', 'churning') "
+        "AND contract_end IS NOT NULL "
+        "AND contract_end <= DATE_ADD(CURRENT_DATE, INTERVAL 90 DAY);"
+    )
+    print(f"\nAt-risk MRR: £{total}")
+
+
 def cmd_help():
-    print("crm — contacts, deals, pipeline (dolt)")
+    print("crm — contacts, deals, pipeline, customers (dolt)")
     print()
     print("Usage: crm <command> [args]")
     print()
     print("Read:")
     print("  pipeline                               Pipeline overview")
     print("  contacts [active]                      List contacts (or active only)")
+    print("  customers [active|all]                 List customer organisations")
+    print("  customer <customer-id>                 Customer detail (contacts, deals, activity)")
     print("  stale                                  Contacts not contacted in 14+ days")
+    print("  renewals                               Renewals due in next 90 days")
     print("  find <term>                            Search by company/name/tag")
     print("  history <contact-id>                   Interaction history")
     print("  deals [won|lost]                       List deals (open, won, or lost)")
@@ -333,6 +429,12 @@ def main():
             cmd_pipeline()
         case "contacts":
             cmd_contacts(args[1] if len(args) > 1 else "")
+        case "customers":
+            cmd_customers(args[1] if len(args) > 1 else "")
+        case "customer":
+            cmd_customer(args[1] if len(args) > 1 else "")
+        case "renewals":
+            cmd_renewals()
         case "stale":
             cmd_stale()
         case "find":
