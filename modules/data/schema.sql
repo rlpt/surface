@@ -77,12 +77,29 @@ CREATE TABLE pool_members (
 -- CRM
 -- ============================================================
 
+CREATE TABLE customers (
+  id VARCHAR(50) PRIMARY KEY,
+  company VARCHAR(200) NOT NULL,
+  pricing_plan VARCHAR(50),
+  status VARCHAR(20) NOT NULL DEFAULT 'onboarding'
+    CHECK (status IN ('onboarding', 'active', 'churning', 'churned')),
+  contract_start DATE,
+  contract_end DATE,
+  mrr_gbp DECIMAL(10,2),
+  instance_id VARCHAR(100),
+  notes TEXT,
+  created_at DATE NOT NULL DEFAULT (CURRENT_DATE)
+);
+
 CREATE TABLE contacts (
   id VARCHAR(50) PRIMARY KEY,
+  customer_id VARCHAR(50),
   company VARCHAR(200) NOT NULL,
   name VARCHAR(200) NOT NULL,
   email VARCHAR(200),
   role VARCHAR(100),
+  contact_role VARCHAR(20)
+    CHECK (contact_role IN ('champion', 'admin', 'billing', 'user', 'executive')),
   source VARCHAR(50),
   stage VARCHAR(20) NOT NULL DEFAULT 'lead'
     CHECK (stage IN ('lead', 'prospect', 'customer', 'churned', 'dormant')),
@@ -90,7 +107,8 @@ CREATE TABLE contacts (
   created_at DATE NOT NULL DEFAULT (CURRENT_DATE),
   last_contacted DATE,
   next_action_date DATE,
-  next_action TEXT
+  next_action TEXT,
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
 CREATE TABLE interactions (
@@ -127,6 +145,51 @@ CREATE TABLE tags (
   tag VARCHAR(50) NOT NULL,
   PRIMARY KEY (contact_id, tag),
   FOREIGN KEY (contact_id) REFERENCES contacts(id)
+);
+
+-- ============================================================
+-- Board (meetings, minutes, resolutions)
+-- ============================================================
+
+CREATE TABLE board_meetings (
+  id VARCHAR(50) PRIMARY KEY,
+  meeting_date DATE NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  location VARCHAR(200),
+  status VARCHAR(20) NOT NULL DEFAULT 'scheduled'
+    CHECK (status IN ('scheduled', 'in-progress', 'completed', 'cancelled')),
+  called_by VARCHAR(200),
+  created_at DATE NOT NULL DEFAULT (CURRENT_DATE),
+  INDEX idx_meeting_date (meeting_date)
+);
+
+CREATE TABLE board_attendees (
+  meeting_id VARCHAR(50) NOT NULL,
+  person_name VARCHAR(200) NOT NULL,
+  role VARCHAR(20) NOT NULL DEFAULT 'director'
+    CHECK (role IN ('chair', 'secretary', 'director', 'observer')),
+  PRIMARY KEY (meeting_id, person_name),
+  FOREIGN KEY (meeting_id) REFERENCES board_meetings(id)
+);
+
+CREATE TABLE board_minutes (
+  meeting_id VARCHAR(50) NOT NULL,
+  seq INT NOT NULL,
+  item_text TEXT NOT NULL,
+  PRIMARY KEY (meeting_id, seq),
+  FOREIGN KEY (meeting_id) REFERENCES board_meetings(id)
+);
+
+CREATE TABLE board_resolutions (
+  id VARCHAR(50) PRIMARY KEY,
+  meeting_id VARCHAR(50) NOT NULL,
+  resolution_text TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'passed', 'failed', 'withdrawn')),
+  proposed_by VARCHAR(200),
+  voted_date DATE,
+  FOREIGN KEY (meeting_id) REFERENCES board_meetings(id),
+  INDEX idx_resolution_status (status)
 );
 
 -- ============================================================
@@ -196,3 +259,28 @@ FROM contacts
 WHERE stage IN ('lead', 'prospect')
   AND (last_contacted IS NULL OR last_contacted < DATE_SUB(CURRENT_DATE, INTERVAL 14 DAY))
 ORDER BY last_contacted ASC;
+
+CREATE VIEW customer_overview AS
+SELECT
+  cu.id,
+  cu.company,
+  cu.pricing_plan,
+  cu.status,
+  cu.mrr_gbp AS mrr,
+  cu.contract_end,
+  COUNT(DISTINCT c.id) AS contacts,
+  COALESCE(SUM(CASE WHEN d.stage = 'closed-won' THEN d.value_gbp ELSE 0 END), 0) AS won_value
+FROM customers cu
+LEFT JOIN contacts c ON c.customer_id = cu.id
+LEFT JOIN deals d ON d.contact_id = c.id
+GROUP BY cu.id, cu.company, cu.pricing_plan, cu.status, cu.mrr_gbp, cu.contract_end;
+
+CREATE VIEW renewals_due AS
+SELECT
+  id, company, pricing_plan, status, mrr_gbp AS mrr, contract_end,
+  DATEDIFF(contract_end, CURRENT_DATE) AS days_left
+FROM customers
+WHERE status IN ('active', 'churning')
+  AND contract_end IS NOT NULL
+  AND contract_end <= DATE_ADD(CURRENT_DATE, INTERVAL 90 DAY)
+ORDER BY contract_end ASC;

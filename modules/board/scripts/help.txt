@@ -1,0 +1,12 @@
+board (meetings, minutes, resolutions — dolt):
+  board meetings                             List all board meetings
+  board meeting <meeting-id>                 Meeting detail (attendees, minutes, resolutions)
+  board resolutions [pending|passed|all]     List resolutions (default: all)
+  board minutes <meeting-id>                 Show minutes for a meeting
+  board html [dir]                           Generate HTML board pack (default: out/board)
+  board serve [dir]                          Build and serve on localhost:8001
+  board new <date> <title>                   Create a new meeting
+  board attend <meeting-id> <person> [role]  Add attendee (role: chair, secretary, director, observer)
+  board minute <meeting-id> <seq> "text"     Add a minute item
+  board resolve <meeting-id> "text"          Propose a resolution
+  board vote <resolution-id> passed|failed   Record resolution outcome

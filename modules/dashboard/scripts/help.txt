@@ -1,0 +1,3 @@
+dashboard (read-only HTML view of company data):
+  build [dir]       Generate HTML dashboard (default: out/dashboard)
+  serve [dir]       Build and serve on localhost:8000
