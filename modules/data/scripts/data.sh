@@ -9,12 +9,18 @@ die() { echo "error: $1" >&2; exit 1; }
 cmd_status() {
   echo "Data directory: $DATA_DIR"
   echo ""
-  for f in "$DATA_DIR"/*.toml; do
-    [ -f "$f" ] || continue
-    name=$(basename "$f" .toml)
-    # Count array-of-tables entries
-    count=$(grep -c '^\[\[' "$f" 2>/dev/null || echo "0")
-    echo "  $name.toml  ($count entries)"
+  for d in "$DATA_DIR"/*/; do
+    [ -d "$d" ] || continue
+    domain=$(basename "$d")
+    echo "  $domain/"
+    for f in "$d"*.csv; do
+      [ -f "$f" ] || continue
+      name=$(basename "$f" .csv)
+      # Count data rows (subtract 1 for header)
+      total=$(wc -l < "$f" | tr -d ' ')
+      rows=$((total - 1))
+      echo "    $name.csv  ($rows rows)"
+    done
   done
 }
 
@@ -77,7 +83,7 @@ cmd_help() {
   echo "  diff               Show uncommitted changes to data/"
   echo "  help               Show this help"
   echo ""
-  echo "Data files live in data/*.toml and are versioned by git."
+  echo "Data files live in data/<domain>/*.csv and are versioned by git."
 }
 
 case "${1:-help}" in

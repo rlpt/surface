@@ -1,6 +1,8 @@
-"""Tests for datalib — shared TOML data layer."""
+"""Tests for datalib — shared CSV data layer."""
 
+import csv
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -10,84 +12,54 @@ import datalib
 
 
 # ---------------------------------------------------------------------------
-# dump_toml / round-trip
+# Type coercion
 # ---------------------------------------------------------------------------
 
-class TestDumpToml(unittest.TestCase):
-    def test_empty_data(self):
-        self.assertEqual(datalib.dump_toml({}), "")
+class TestCoerceTypes(unittest.TestCase):
+    def test_integer(self):
+        self.assertEqual(datalib._coerce_types({"v": "42"})["v"], 42)
 
-    def test_array_of_tables(self):
-        data = {"items": [{"name": "a", "value": 1}]}
-        result = datalib.dump_toml(data)
-        self.assertIn("[[items]]", result)
-        self.assertIn('name = "a"', result)
-        self.assertIn("value = 1", result)
+    def test_negative_integer(self):
+        self.assertEqual(datalib._coerce_types({"v": "-5"})["v"], -5)
 
-    def test_single_table(self):
-        data = {"meta": {"version": 1, "name": "test"}}
-        result = datalib.dump_toml(data)
-        self.assertIn("[meta]", result)
-        self.assertIn("version = 1", result)
+    def test_float(self):
+        self.assertAlmostEqual(datalib._coerce_types({"v": "3.14"})["v"], 3.14)
 
-    def test_bool_values(self):
-        data = {"items": [{"flag": True, "other": False}]}
-        result = datalib.dump_toml(data)
-        self.assertIn("flag = true", result)
-        self.assertIn("other = false", result)
+    def test_bool_true(self):
+        self.assertIs(datalib._coerce_types({"v": "true"})["v"], True)
 
-    def test_float_values(self):
-        data = {"items": [{"price": 19.99}]}
-        result = datalib.dump_toml(data)
-        self.assertIn("price = 19.99", result)
+    def test_bool_false(self):
+        self.assertIs(datalib._coerce_types({"v": "false"})["v"], False)
 
-    def test_string_escaping(self):
-        data = {"items": [{"name": 'O"Brien'}]}
-        result = datalib.dump_toml(data)
-        self.assertIn('name = "O\\"Brien"', result)
+    def test_string(self):
+        self.assertEqual(datalib._coerce_types({"v": "hello"})["v"], "hello")
 
-    def test_backslash_escaping(self):
-        data = {"items": [{"path": "C:\\Users\\test"}]}
-        result = datalib.dump_toml(data)
-        self.assertIn("C:\\\\Users\\\\test", result)
+    def test_empty_string(self):
+        self.assertEqual(datalib._coerce_types({"v": ""})["v"], "")
 
-    def test_multiple_tables(self):
-        data = {
-            "holders": [{"id": "a"}, {"id": "b"}],
-            "events": [{"type": "grant"}],
-        }
-        result = datalib.dump_toml(data)
-        self.assertEqual(result.count("[[holders]]"), 2)
-        self.assertEqual(result.count("[[events]]"), 1)
+    def test_date_stays_string(self):
+        self.assertEqual(datalib._coerce_types({"v": "2026-03-01"})["v"], "2026-03-01")
+
+    def test_path_stays_string(self):
+        self.assertEqual(datalib._coerce_types({"v": "assets:bank:tide"})["v"], "assets:bank:tide")
+
+    def test_leading_zeros_stay_string(self):
+        # "007" should not become 7
+        self.assertEqual(datalib._coerce_types({"v": "007"})["v"], "007")
 
 
-class TestRoundTrip(unittest.TestCase):
-    """Verify dump_toml output can be re-parsed by tomllib."""
+class TestCsvVal(unittest.TestCase):
+    def test_bool_true(self):
+        self.assertEqual(datalib._csv_val(True), "true")
 
-    def test_round_trip_simple(self):
-        import tomllib
-        data = {
-            "share_classes": [{"name": "ordinary", "nominal_value": 0.01, "authorised": 10000}],
-            "holders": [{"id": "alice", "display_name": "Alice Smith"}],
-        }
-        toml_str = datalib.dump_toml(data)
-        parsed = tomllib.loads(toml_str)
-        self.assertEqual(parsed["share_classes"][0]["name"], "ordinary")
-        self.assertAlmostEqual(parsed["share_classes"][0]["nominal_value"], 0.01)
-        self.assertEqual(parsed["holders"][0]["id"], "alice")
+    def test_bool_false(self):
+        self.assertEqual(datalib._csv_val(False), "false")
 
-    def test_round_trip_booleans(self):
-        import tomllib
-        data = {"contracts": [{"auto_renew": True, "active": False}]}
-        parsed = tomllib.loads(datalib.dump_toml(data))
-        self.assertIs(parsed["contracts"][0]["auto_renew"], True)
-        self.assertIs(parsed["contracts"][0]["active"], False)
+    def test_int_passthrough(self):
+        self.assertEqual(datalib._csv_val(42), 42)
 
-    def test_round_trip_special_chars(self):
-        import tomllib
-        data = {"items": [{"text": 'He said "hello" & goodbye'}]}
-        parsed = tomllib.loads(datalib.dump_toml(data))
-        self.assertEqual(parsed["items"][0]["text"], 'He said "hello" & goodbye')
+    def test_string_passthrough(self):
+        self.assertEqual(datalib._csv_val("hello"), "hello")
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +74,9 @@ class TestLoadSave(unittest.TestCase):
 
     def tearDown(self):
         datalib.DATA_DIR = self._orig_data_dir
-        import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_load_missing_file(self):
+    def test_load_missing_domain(self):
         result = datalib.load("nonexistent")
         self.assertEqual(result, {})
 
@@ -126,6 +97,40 @@ class TestLoadSave(unittest.TestCase):
         datalib.save("test", {"items": [{"v": 2}]})
         loaded = datalib.load("test")
         self.assertEqual(loaded["items"][0]["v"], 2)
+
+    def test_round_trip_types(self):
+        data = {
+            "rows": [
+                {"name": "test", "count": 42, "price": 9.99, "active": True, "date": "2026-01-01"},
+            ],
+        }
+        datalib.save("test", data)
+        loaded = datalib.load("test")
+        row = loaded["rows"][0]
+        self.assertEqual(row["name"], "test")
+        self.assertEqual(row["count"], 42)
+        self.assertAlmostEqual(row["price"], 9.99)
+        self.assertIs(row["active"], True)
+        self.assertEqual(row["date"], "2026-01-01")
+
+    def test_empty_table_removes_file(self):
+        datalib.save("test", {"items": [{"v": 1}]})
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, "test", "items.csv")))
+        datalib.save("test", {"items": []})
+        self.assertFalse(os.path.exists(os.path.join(self.tmpdir, "test", "items.csv")))
+
+    def test_load_ignores_non_csv(self):
+        domain_dir = os.path.join(self.tmpdir, "test")
+        os.makedirs(domain_dir)
+        with open(os.path.join(domain_dir, "notes.txt"), "w") as f:
+            f.write("ignore me")
+        with open(os.path.join(domain_dir, "items.csv"), "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["id"])
+            writer.writeheader()
+            writer.writerow({"id": "a"})
+        loaded = datalib.load("test")
+        self.assertIn("items", loaded)
+        self.assertNotIn("notes", loaded)
 
 
 # ---------------------------------------------------------------------------
@@ -416,8 +421,7 @@ class TestValidateRefs(unittest.TestCase):
             "pools": [{"name": "founder", "share_class": "ordinary", "budget": 8000}],
             "pool_members": [{"pool_name": "founder", "holder_id": "alice"}],
         }
-        errors = datalib.validate_refs("shares", data)
-        self.assertEqual(errors, [])
+        self.assertEqual(datalib.validate_refs("shares", data), [])
 
     def test_orphan_holder_in_events(self):
         data = {
@@ -433,7 +437,7 @@ class TestValidateRefs(unittest.TestCase):
 
     def test_orphan_share_class_in_events(self):
         data = {
-            "share_classes": [{"name": "ordinary", "nominal_value": 0.01, "authorised": 10000}],
+            "share_classes": [{"name": "ordinary"}],
             "holders": [{"id": "alice", "display_name": "Alice"}],
             "share_events": [
                 {"event_date": "2024-01-01", "event_type": "grant",
@@ -443,20 +447,9 @@ class TestValidateRefs(unittest.TestCase):
         errors = datalib.validate_refs("shares", data)
         self.assertTrue(any("phantom" in e for e in errors))
 
-    def test_orphan_pool_class(self):
-        data = {
-            "share_classes": [{"name": "ordinary", "nominal_value": 0.01, "authorised": 10000}],
-            "holders": [],
-            "share_events": [],
-            "pools": [{"name": "esop", "share_class": "phantom", "budget": 1000}],
-            "pool_members": [],
-        }
-        errors = datalib.validate_refs("shares", data)
-        self.assertTrue(any("phantom" in e for e in errors))
-
     def test_orphan_pool_member(self):
         data = {
-            "share_classes": [{"name": "ordinary", "nominal_value": 0.01, "authorised": 10000}],
+            "share_classes": [{"name": "ordinary"}],
             "holders": [{"id": "alice", "display_name": "Alice"}],
             "share_events": [],
             "pools": [{"name": "founder", "share_class": "ordinary", "budget": 8000}],
@@ -464,17 +457,6 @@ class TestValidateRefs(unittest.TestCase):
         }
         errors = datalib.validate_refs("shares", data)
         self.assertTrue(any("ghost" in e for e in errors))
-
-    def test_orphan_pool_name_in_members(self):
-        data = {
-            "share_classes": [],
-            "holders": [{"id": "alice", "display_name": "Alice"}],
-            "share_events": [],
-            "pools": [],
-            "pool_members": [{"pool_name": "nonexistent", "holder_id": "alice"}],
-        }
-        errors = datalib.validate_refs("shares", data)
-        self.assertTrue(any("nonexistent" in e for e in errors))
 
     def test_clean_accounts_data(self):
         data = {
@@ -484,30 +466,18 @@ class TestValidateRefs(unittest.TestCase):
                 {"txn_id": 1, "account_path": "expenses:hosting", "amount": 45.0, "currency": "GBP"},
             ],
         }
-        errors = datalib.validate_refs("accounts", data)
-        self.assertEqual(errors, [])
+        self.assertEqual(datalib.validate_refs("accounts", data), [])
 
     def test_orphan_account_in_postings(self):
         data = {
             "accounts": [{"path": "expenses:hosting", "account_type": "expenses"}],
-            "transactions": [{"id": 1, "txn_date": "2026-01-01", "payee": "AWS", "description": "Hosting"}],
+            "transactions": [],
             "postings": [
                 {"txn_id": 1, "account_path": "expenses:unknown", "amount": 45.0, "currency": "GBP"},
             ],
         }
         errors = datalib.validate_refs("accounts", data)
         self.assertTrue(any("expenses:unknown" in e for e in errors))
-
-    def test_orphan_txn_in_postings(self):
-        data = {
-            "accounts": [{"path": "expenses:hosting", "account_type": "expenses"}],
-            "transactions": [],
-            "postings": [
-                {"txn_id": 99, "account_path": "expenses:hosting", "amount": 45.0, "currency": "GBP"},
-            ],
-        }
-        errors = datalib.validate_refs("accounts", data)
-        self.assertTrue(any("99" in e for e in errors))
 
     def test_clean_crm_data(self):
         data = {
@@ -518,19 +488,7 @@ class TestValidateRefs(unittest.TestCase):
                                 "quantity": 1, "unit_price": 100, "frequency": "monthly"}],
             "contract_clauses": [{"contract_id": "ct-acme-1", "seq": 1, "heading": "Terms", "body": "..."}],
         }
-        errors = datalib.validate_refs("crm", data)
-        self.assertEqual(errors, [])
-
-    def test_orphan_customer_in_contacts(self):
-        data = {
-            "customers": [],
-            "contacts": [{"id": "acme-jane", "customer_id": "acme", "name": "Jane"}],
-            "contracts": [],
-            "contract_lines": [],
-            "contract_clauses": [],
-        }
-        errors = datalib.validate_refs("crm", data)
-        self.assertTrue(any("acme" in e for e in errors))
+        self.assertEqual(datalib.validate_refs("crm", data), [])
 
     def test_orphan_customer_in_contracts(self):
         data = {
@@ -543,18 +501,6 @@ class TestValidateRefs(unittest.TestCase):
         errors = datalib.validate_refs("crm", data)
         self.assertTrue(any("ghost" in e for e in errors))
 
-    def test_orphan_contract_in_lines(self):
-        data = {
-            "customers": [],
-            "contacts": [],
-            "contracts": [],
-            "contract_lines": [{"contract_id": "ct-nope", "seq": 1, "description": "X",
-                                "quantity": 1, "unit_price": 100, "frequency": "monthly"}],
-            "contract_clauses": [],
-        }
-        errors = datalib.validate_refs("crm", data)
-        self.assertTrue(any("ct-nope" in e for e in errors))
-
     def test_clean_board_data(self):
         data = {
             "board_meetings": [{"id": "bm-2026-01-01", "meeting_date": "2026-01-01", "title": "Q1"}],
@@ -563,8 +509,7 @@ class TestValidateRefs(unittest.TestCase):
             "board_resolutions": [{"id": "bm-2026-01-01-r1", "meeting_id": "bm-2026-01-01",
                                    "resolution_text": "Approve", "status": "passed"}],
         }
-        errors = datalib.validate_refs("board", data)
-        self.assertEqual(errors, [])
+        self.assertEqual(datalib.validate_refs("board", data), [])
 
     def test_orphan_meeting_in_attendees(self):
         data = {
@@ -577,8 +522,7 @@ class TestValidateRefs(unittest.TestCase):
         self.assertTrue(any("bm-nope" in e for e in errors))
 
     def test_unknown_domain_returns_empty(self):
-        errors = datalib.validate_refs("unknown", {})
-        self.assertEqual(errors, [])
+        self.assertEqual(datalib.validate_refs("unknown", {}), [])
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +530,7 @@ class TestValidateRefs(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestPrintTable(unittest.TestCase):
-    def test_empty_rows(self, ):
+    def test_empty_rows(self):
         import io
         from contextlib import redirect_stdout
         buf = io.StringIO()

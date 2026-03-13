@@ -1,9 +1,10 @@
-"""datalib — shared TOML data layer for surface modules."""
+"""datalib — shared CSV data layer for surface modules."""
 
+import csv
+import io
 import os
 import subprocess
 import sys
-import tomllib
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -21,19 +22,41 @@ def die(msg):
 # ---------------------------------------------------------------------------
 
 def load(domain):
-    """Load a TOML data file, returning a dict of lists."""
-    path = os.path.join(DATA_DIR, f"{domain}.toml")
-    if not os.path.exists(path):
+    """Load all CSV files from data/<domain>/, returning a dict of lists."""
+    domain_dir = os.path.join(DATA_DIR, domain)
+    if not os.path.isdir(domain_dir):
         return {}
-    with open(path, "rb") as f:
-        return tomllib.load(f)
+    result = {}
+    for fname in sorted(os.listdir(domain_dir)):
+        if not fname.endswith(".csv"):
+            continue
+        table_name = fname[:-4]
+        path = os.path.join(domain_dir, fname)
+        with open(path, newline="") as f:
+            reader = csv.DictReader(f)
+            result[table_name] = [_coerce_types(row) for row in reader]
+    return result
 
 
 def save(domain, data):
-    """Write data dict back to TOML."""
-    path = os.path.join(DATA_DIR, f"{domain}.toml")
-    with open(path, "w") as f:
-        f.write(dump_toml(data))
+    """Write data dict back to CSV files in data/<domain>/."""
+    domain_dir = os.path.join(DATA_DIR, domain)
+    os.makedirs(domain_dir, exist_ok=True)
+    for table_name, rows in data.items():
+        if not isinstance(rows, list):
+            continue
+        path = os.path.join(domain_dir, f"{table_name}.csv")
+        if not rows:
+            # Remove empty table files
+            if os.path.exists(path):
+                os.remove(path)
+            continue
+        fieldnames = list(rows[0].keys())
+        with open(path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({k: _csv_val(v) for k, v in row.items()})
 
 
 def git_commit(msg):
@@ -43,42 +66,51 @@ def git_commit(msg):
 
 
 # ---------------------------------------------------------------------------
-# TOML writer (no external dependency)
+# CSV type helpers
 # ---------------------------------------------------------------------------
 
-def dump_toml(data):
-    """Dump a dict of lists-of-dicts as TOML array-of-tables."""
-    lines = []
-    for key, value in data.items():
-        if isinstance(value, list):
-            for item in value:
-                lines.append(f"[[{key}]]")
-                for k, v in item.items():
-                    lines.append(f"{k} = {_toml_val(v)}")
-                lines.append("")
-        elif isinstance(value, dict):
-            lines.append(f"[{key}]")
-            for k, v in value.items():
-                lines.append(f"{k} = {_toml_val(v)}")
-            lines.append("")
-    return "\n".join(lines) + "\n" if lines else ""
+def _coerce_types(row):
+    """Infer Python types from CSV string values."""
+    out = {}
+    for k, v in row.items():
+        if v == "":
+            out[k] = ""
+            continue
+        if v == "true":
+            out[k] = True
+            continue
+        if v == "false":
+            out[k] = False
+            continue
+        try:
+            iv = int(v)
+            # Only promote if the string round-trips exactly (preserves "007" as string)
+            if str(iv) == v:
+                out[k] = iv
+                continue
+        except ValueError:
+            pass
+        # Only try float if it contains a decimal point (avoids "007" → 7.0)
+        if "." in v:
+            try:
+                fv = float(v)
+                out[k] = fv
+                continue
+            except ValueError:
+                pass
+        out[k] = v
+    return out
 
 
-def _toml_val(v):
+def _csv_val(v):
+    """Convert a Python value to a CSV-safe string."""
     if isinstance(v, bool):
         return "true" if v else "false"
-    if isinstance(v, int):
-        return str(v)
-    if isinstance(v, float):
-        return str(v)
-    if isinstance(v, str):
-        escaped = v.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-    return f'"{v}"'
+    return v
 
 
 # ---------------------------------------------------------------------------
-# Computed views (replicate SQL views in Python)
+# Computed views
 # ---------------------------------------------------------------------------
 
 def holdings(share_data=None):
