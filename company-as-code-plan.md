@@ -1,38 +1,39 @@
 # Formabi as Code
 
-The repo IS the company. The system is called **formabi**. It has three parts, like a ship:
+The repo IS the company. The system is called **formabi**. It is a **guild** — a group of craftspeople who share a workspace, tools, and a ledger.
 
-- **hull** — the body. The NixOS server where the company runs. `deploy hull`.
-- **bridge** — the command center. The shell where you query, transact, and steer. `bridge` to enter. Forgejo (`code.formabi.com`) is the glass bridge — same view, browser-shaped.
-- **wake** — the trail. Datom log + git history. Immutable, append-only. You can't change your wake. `wake log`.
+- **The server** — a single large dedicated machine. The guild hall. Everyone SSHs in, works, and collaborates here. NixOS makes it declarative and reproducible.
+- **devenv** — the workbench. Provides each guild member with the right tools for their craft, scoped by role.
+- **Dolt** — the ledger. A SQL database with git-like version control. Branch, merge, diff, time travel. The source of truth for anything with identity (people, customers, instances).
+- **Git** — tracks configuration, knowledge, decisions, infrastructure. Every change is a commit.
+- **SSH** — how you enter the guild hall. Your key is your identity.
 
-Read the repo and you become formabi — you know the mission, the people, the customers, the architecture, the current priorities, and how to make decisions consistent with how formabi operates. Enter the bridge and you can query state, transact changes, derive views, and deploy. Human or LLM — the interface is the same. The company is the program. The bridge is where you steer it.
+Read the repo and you become formabi — you know the mission, the people, the customers, the architecture, the current priorities, and how to make decisions consistent with how formabi operates. SSH into the server and you can query state, make changes, and deploy. Human or LLM — the interface is the same. The company is the program.
 
-Four formats, each for what it's best at:
-- **Datoms** — immutable append-only log of entity facts `{ e, a, v, op, t }`. The source of truth for anything with identity (people, customers, instances). LLMs never generate IDs — they express intent as JSON, a tool converts to datoms.
-- **JSON** — derived views of current state (roster.json, customers.json) + manually maintained narrative (stage.json, priorities.json). Machine-readable, queryable, LLM-native.
+Three formats, each for what it's best at:
+- **Dolt (SQL)** — structured entity data with built-in versioning. People, customers, instances — anything with identity and lifecycle. `dolt log`, `dolt diff`, `dolt sql -q "SELECT * FROM roster"`. Branch for proposals, merge to apply.
 - **Markdown** — company knowledge (mission, processes, voice, decisions, context). Human-readable, LLM-native.
-- **Nix** — infrastructure and composition (shells, servers, builds). Reads JSON, produces reproducible outputs.
+- **Nix** — infrastructure and composition (shells, servers, builds). Reads from Dolt and JSON, produces reproducible outputs.
 
-Git ties them together. Every change is a commit. The wake — datom log + git history — is the company's memory. Append-only, replayable, time-travelable. You can't change your wake.
+Git and Dolt together form the company's memory. Git tracks config and prose. Dolt tracks entity data. Both are versioned, diffable, and time-travelable.
 
 ## Principles
 
-1. **The LLM never has more permissions than the active user.** This is the hard rule. The LLM runs in the user's shell, with the user's repos, the user's role, the user's git identity. It cannot see repos the user hasn't cloned. It cannot transact changes the user's role doesn't allow. It cannot deploy if the user doesn't have ops access. The LLM is never a privilege escalation vector — it is always bounded by the human sitting at the keyboard.
-2. **Hull, bridge, wake** — The company is a ship. The hull runs it (server). The bridge steers it (shell). The wake records it (datom log + git). Human or LLM — same bridge, same permissions.
-3. **Separate repos are the security boundary** — GitHub permissions control who sees what. The root flake never references private repos as inputs.
+1. **The LLM never has more permissions than the active user.** This is the hard rule. The LLM runs in the user's shell, with the user's repos, the user's role, the user's git identity. It cannot see repos the user hasn't cloned. It cannot make changes the user's role doesn't allow. It cannot deploy if the user doesn't have ops access. The LLM is never a privilege escalation vector — it is always bounded by the human sitting at the keyboard.
+2. **One server, shared workspace** — Everyone SSHs into the same machine. Unix users, groups, and file permissions enforce boundaries. The server IS the company.
+3. **Separate repos are the security boundary** — GitHub/Forgejo permissions control who sees what. The root flake never references private repos as inputs.
 4. **Works with any/all modules missing** — Zero repos cloned = base shell still works. It never fails, it just gives you less.
-5. **One definition, two targets** — `people/alice.nix` produces her local shell AND her server access. Change it once, both sides update.
-6. **Datoms for entities, JSON for views, markdown for knowledge, nix for infra** — Each format for what it's best at. LLMs write intent, tools write datoms, state is derived.
-7. **Git is the audit log** — Every change to people, roles, servers, and instances is a commit with a reviewer.
-8. **KISS** — Simple files. No custom tooling beyond shell scripts.
+5. **One definition, two targets** — `people/alice.nix` produces her devenv shell AND her server access. Change it once, both sides update.
+6. **Dolt for entities, markdown for knowledge, nix for infra** — Each format for what it's best at. Dolt gives you SQL + version control without custom tooling.
+7. **Git is the audit log** — Every change to roles, servers, and instances is a commit with a reviewer. Dolt provides its own audit log for entity data.
+8. **KISS** — Simple files. No custom tooling beyond shell scripts. Dolt replaces the need for custom transact/derive tools.
 
 ## The Big Idea
 
 Today you already have two halves:
 
 - **Local**: devenv shells per-repo, each configured independently
-- **Server**: NixOS on hull (currently called formrunner), declared in cmdr/deploy/, deployed with deploy-rs
+- **Server**: NixOS on the server (currently called formrunner), declared in cmdr/deploy/, deployed with deploy-rs
 
 These halves don't know about each other. `users.nix` on the server has hardcoded SSH keys. `devenv.nix` in each repo has hardcoded tools. There's no shared definition of "who works here" or "what they can do."
 
@@ -41,19 +42,19 @@ The idea: a **root flake** that is the single source of truth for the company. I
 ```
 formabi (root flake)
   │
-  ├── nix develop .#alice     → local shell with her tools, repos, AI context
-  ├── nix develop .#ops       → local shell for ops role (anyone)
+  ├── nix develop .#alice     → devenv shell with her tools, repos, AI context
+  ├── nix develop .#ops       → devenv shell for ops role (anyone)
   │
   ├── nixosConfigurations     → server configs that read the same people/roles
-  │     └── hull        → SSH keys, unix users, services — all derived
+  │     └── server            → SSH keys, unix users, services — all derived
   │
   └── packages                → built artifacts (app binary, deck html, etc.)
 ```
 
 One `people/alice.nix` file produces:
-- Her local devShell (tools for her roles)
+- Her devenv shell (tools for her roles)
 - Her SSH authorized key on the server
-- Her unix user on hull
+- Her unix user on the server
 - Her CLAUDE.md context
 - Her entry in the company handbook "team" page
 
@@ -77,8 +78,7 @@ formabi/                              ← root repo — the company
 │   └── brand.json                    ← { name, strapline, colors, fonts }
 │
 ├── people/                           ← WHO works here
-│   ├── roster.json                   ← structured: [ { name, github, email, roles, sshKeys, region, started } ]
-│   └── default.nix                   ← reads roster.json, exposes to nix
+│   └── default.nix                   ← reads from Dolt roster table, exposes to nix
 │
 ├── roles/                            ← WHAT each role can do
 │   ├── engineering.nix               ← repos, tools, server access, AI context scope
@@ -87,9 +87,8 @@ formabi/                              ← root repo — the company
 │   ├── design.nix
 │   └── default.nix                   ← role registry
 │
-├── state/                            ← WHERE the company is right now (JSON)
+├── state/                            ← WHERE the company is right now (manual JSON)
 │   ├── stage.json                    ← { stage, runway_months, funding, focus }
-│   ├── customers.json                ← [ { name, domain, tier, port, provisioned, status } ]
 │   ├── priorities.json               ← ordered list: what matters this quarter
 │   └── metrics.json                  ← { mrr, active_users, instances, uptime }
 │
@@ -107,13 +106,13 @@ formabi/                              ← root repo — the company
 │   └── zolanic.nix                   ← zolanic: astro, brand
 │
 ├── server/                           ← NixOS configs (nix)
-│   ├── hull/
-│   │   ├── configuration.nix
-│   │   └── hardware-configuration.nix
+│   ├── configuration.nix
+│   ├── hardware-configuration.nix
 │   └── shared/
 │       ├── common.nix
-│       ├── users.nix                 ← derived from people/roster.json
-│       └── services.nix              ← derived from state/customers.json
+│       ├── users.nix                 ← derived from Dolt roster table
+│       ├── services.nix              ← derived from Dolt customers table
+│       └── forgejo.nix
 │
 ├── context/                          ← AI context fragments (markdown, per-role)
 │   ├── base.md                       ← assembled for everyone
@@ -126,7 +125,7 @@ formabi/                              ← root repo — the company
 │   └── *.age                         ← encrypted secret files
 │
 ├── base/
-│   └── default.nix                   ← always-on: git, halp, whoami, onboard
+│   └── default.nix                   ← always-on: git, dolt, halp, whoami, onboard
 │
 └── scripts/
     ├── onboard.sh
@@ -134,7 +133,7 @@ formabi/                              ← root repo — the company
     └── halp.sh
 ```
 
-### The Four Layers
+### The Three Layers
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -143,20 +142,17 @@ formabi/                              ← root repo — the company
 │  decisions/*.md, context/*.md                            │
 │  → LLM reads this and becomes formabi                    │
 ├──────────────────────────────────────────────────────────┤
-│  TRUTH (datoms)                            ┌───────────┐ │
-│  log/company.datoms                        │ LLM says: │ │
-│  append-only immutable fact log            │ intent as │ │
-│  { e, a, v, op, timestamp }               │ plain JSON │ │
-│  → source of truth for entities            │ ↓          │ │
-│  → tool generates IDs + validates          │ tool      │ │
-│  → replayable, time-travelable             │ converts  │ │
-│                                            │ to datoms │ │
-│          │ derive                          └───────────┘ │
-│          ▼                                               │
-│  VIEWS (derived json)                                    │
-│  people/roster.json, state/customers.json                │
-│  → read-only snapshots of current state                  │
-│  → regenerable from log at any time                      │
+│  ENTITIES (Dolt — SQL + git versioning)                  │
+│                                                          │
+│  roster table     — people, roles, SSH keys, regions     │
+│  customers table  — name, domain, tier, port, status     │
+│  instances table  — provisioned workspaces               │
+│                                                          │
+│  Built-in: branch, merge, diff, log, time travel         │
+│  Query: dolt sql -q "SELECT * FROM roster"               │
+│  History: dolt log, dolt diff HEAD~1 HEAD                │
+│  Propose: dolt checkout -b hire-dave, make changes,      │
+│           dolt merge hire-dave                            │
 │                                                          │
 │  NARRATIVE (manual json)                                 │
 │  state/stage.json, state/priorities.json                 │
@@ -166,63 +162,79 @@ formabi/                              ← root repo — the company
 │  INFRASTRUCTURE (nix)                                    │
 │  flake.nix, roles/*.nix, modules/*.nix,                  │
 │  server/**/*.nix, base/default.nix                       │
-│  → reads JSON views, produces shells + servers           │
+│  → reads Dolt + JSON, produces shells + servers          │
 └──────────────────────────────────────────────────────────┘
          │
-         │  git log
+         │  git log + dolt log
          ▼
-    HISTORY (git)
-    every datom append, every JSON change, every nix edit
-    is a commit with an author and a reason
+    HISTORY
+    every Dolt commit, every JSON change, every nix edit
+    is versioned with an author and a reason
 ```
 
-### People (JSON — the universal format)
+### People (Dolt — SQL with version control)
 
-```json
-// people/roster.json
-[
-  {
-    "id": "alice",
-    "name": "Alice",
-    "github": "alice",
-    "email": "alice@formabi.com",
-    "roles": ["engineering", "ops"],
-    "region": "uk",
-    "started": "2024-06-01",
-    "sshKeys": ["ssh-ed25519 AAAAC3Nza... alice@formabi.com"]
-  },
-  {
-    "id": "bob",
-    "name": "Bob",
-    "github": "bob",
-    "email": "bob@formabi.com",
-    "roles": ["engineering"],
-    "region": "singapore",
-    "started": "2025-01-15",
-    "sshKeys": ["ssh-ed25519 AAAAC3Nza... bob@formabi.com"]
-  }
-]
+```sql
+-- roster table in Dolt
+CREATE TABLE roster (
+  id VARCHAR(26) PRIMARY KEY,   -- ULID, generated by Dolt
+  name VARCHAR(255) NOT NULL,
+  github VARCHAR(255),
+  email VARCHAR(255) UNIQUE NOT NULL,
+  region VARCHAR(50),
+  started DATE NOT NULL,
+  active BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE person_roles (
+  person_id VARCHAR(26) REFERENCES roster(id),
+  role VARCHAR(50) NOT NULL,
+  PRIMARY KEY (person_id, role)
+);
+
+CREATE TABLE ssh_keys (
+  person_id VARCHAR(26) REFERENCES roster(id),
+  key_type VARCHAR(50) NOT NULL,
+  public_key TEXT NOT NULL,
+  PRIMARY KEY (person_id, key_type)
+);
 ```
 
-Why JSON not nix:
-- Any LLM can read it directly — no nix knowledge needed
-- `jq` queries from shell scripts: `jq '.[] | select(.roles[] == "ops")' roster.json`
-- Nix imports it with `builtins.fromJSON (builtins.readFile ./roster.json)`
-- Diffable in git — hiring/offboarding shows as clear JSON diffs
-- Other tools (CI, handbook generator, billing) consume it without nix
+```bash
+# Query the guild roster
+dolt sql -q "SELECT r.name, r.email, r.region, GROUP_CONCAT(pr.role) as roles
+             FROM roster r
+             JOIN person_roles pr ON r.id = pr.person_id
+             WHERE r.active = TRUE
+             GROUP BY r.id"
+
+# Who has ops access?
+dolt sql -q "SELECT r.name FROM roster r
+             JOIN person_roles pr ON r.id = pr.person_id
+             WHERE pr.role = 'ops' AND r.active = TRUE"
+```
+
+Why Dolt:
+- SQL is universal — any LLM can query it, any tool can consume it
+- Git-like versioning built in — `dolt log`, `dolt diff`, `dolt blame`
+- Branch for proposals: `dolt checkout -b hire-dave`, make changes, `dolt merge`
+- Time travel: `SELECT * FROM roster AS OF 'HEAD~5'`
+- No custom tooling needed — no `formabi-transact`, no `formabi-derive`
+- Nix can export to JSON at build time: `dolt sql -q "SELECT ..." -r json`
+- Diffable history — hiring/offboarding shows as clear SQL diffs
 
 One roster entry feeds:
 
 | Consumer | What it produces |
 |----------|-----------------|
-| Nix (local) | devShell with engineering + ops tools, repos, AI context |
+| Nix (local) | devenv shell with engineering + ops tools, repos, AI context |
 | Nix (server) | Unix user with SSH key, wheel group (because ops role) |
 | Nix (secrets) | agenix access scoped to role |
 | LLM | "Alice is an engineer and ops lead in the UK region" |
 | Handbook | Team page with name, role, region |
-| jq/scripts | Queryable from any shell: `jq '.[] | .name' roster.json` |
+| SQL | Queryable from any shell: `dolt sql -q "SELECT name FROM roster"` |
 
-### Company State (JSON — current snapshot)
+### Company State (manual JSON — current snapshot)
 
 ```json
 // state/stage.json
@@ -236,28 +248,6 @@ One roster entry feeds:
 ```
 
 ```json
-// state/customers.json
-[
-  {
-    "name": "demo",
-    "domain": "demo.zolanic.space",
-    "port": 3100,
-    "tier": "free",
-    "status": "active",
-    "provisioned": "2025-01-01"
-  },
-  {
-    "name": "acme-corp",
-    "domain": "acme.formabi.app",
-    "port": 3101,
-    "tier": "pro",
-    "status": "active",
-    "provisioned": "2025-03-15"
-  }
-]
-```
-
-```json
 // state/priorities.json
 [
   "Ship form engine v1 — complete fill/submit flow",
@@ -266,8 +256,34 @@ One roster entry feeds:
 ]
 ```
 
-This state data feeds everything:
-- **Nix server config** reads customers.json to generate systemd services + nginx vhosts
+Customers live in Dolt (entity data with identity), not in JSON:
+
+```sql
+-- customers table in Dolt
+CREATE TABLE customers (
+  id VARCHAR(26) PRIMARY KEY,
+  name VARCHAR(255) UNIQUE NOT NULL,
+  domain VARCHAR(255) NOT NULL,
+  port INTEGER NOT NULL,
+  tier VARCHAR(50) NOT NULL,
+  status VARCHAR(50) DEFAULT 'active',
+  provisioned DATE NOT NULL
+);
+```
+
+```bash
+# List active customers
+dolt sql -q "SELECT name, domain, tier, status FROM customers WHERE status = 'active'"
+
+# When was acme provisioned?
+dolt sql -q "SELECT name, provisioned FROM customers WHERE name = 'acme-corp'"
+
+# Customer history via Dolt log
+dolt log --tables customers
+```
+
+This data feeds everything:
+- **Nix server config** reads customers (exported as JSON) to generate systemd services + nginx vhosts
 - **LLM** reads stage.json and priorities.json to make decisions aligned with current focus
 - **Pitch decks** can pull live metrics
 - **Onboard script** shows new hires what's happening right now
@@ -411,7 +427,7 @@ How formabi communicates:
 }
 ```
 
-Roles stay in nix because they produce nix outputs (packages, server access levels). But they read from the JSON data layer — `roster.json` determines who has which role.
+Roles stay in nix because they produce nix outputs (packages, server access levels). But they read from the Dolt data layer — the roster table determines who has which role.
 
 ## Core Mechanism: Graceful Degradation
 
@@ -446,35 +462,35 @@ An LLM given this repo can:
 |------------|--------------|
 | Answer "what is formabi?" | identity/mission.md |
 | Write in formabi's voice | identity/voice.md |
-| Know who works here and their roles | people/roster.json |
+| Know who works here and their roles | Dolt roster + person_roles tables |
 | Understand the current company stage | state/stage.json |
 | Know what matters right now | state/priorities.json |
-| Know who the customers are | state/customers.json |
+| Know who the customers are | Dolt customers table |
 | Explain why Elm was chosen over React | decisions/001-elm-frontend.md |
 | Write code that fits the architecture | context/app.md + decisions/ |
-| Draft a customer email in the right tone | identity/voice.md + state/customers.json |
+| Draft a customer email in the right tone | identity/voice.md + Dolt customers |
 | Make a decision consistent with precedent | decisions/index.json + decisions/*.md |
 | Generate a pitch with current metrics | state/metrics.json + brand/brand.json |
-| Onboard a new hire | people/roster.json + identity/processes.md + roles/ |
+| Onboard a new hire | Dolt roster + identity/processes.md + roles/ |
 
 The LLM doesn't need to be told "we use Elm" every time. It reads the decision log and knows. It doesn't need to be told "be concise" every time. It reads voice.md and knows. The repo is the company's accumulated intelligence, and the LLM inherits it.
 
 ### Context assembly per role
 
-When alice (engineering + ops) opens Claude Code on her bridge, the system assembles:
+When alice (engineering + ops) opens Claude Code, the system assembles:
 
 ```
 identity/mission.md          ← everyone gets this
 identity/voice.md            ← everyone gets this
 identity/processes.md        ← everyone gets this
-people/roster.json           ← everyone gets this (public info)
+Dolt roster summary          ← everyone gets this (public info)
 state/stage.json             ← everyone gets this
 state/priorities.json        ← everyone gets this
 brand/brand.json             ← everyone gets this
 decisions/index.json         ← everyone gets this
 context/app.md               ← because engineering role
 context/ops.md               ← because ops role
-state/customers.json         ← because ops role (needs instance awareness)
+Dolt customers summary       ← because ops role (needs instance awareness)
 ```
 
 When bob (sales) opens Claude Code:
@@ -483,7 +499,7 @@ When bob (sales) opens Claude Code:
 identity/mission.md          ← everyone gets this
 identity/voice.md            ← everyone gets this
 identity/processes.md        ← everyone gets this
-people/roster.json           ← everyone gets this
+Dolt roster summary          ← everyone gets this
 state/stage.json             ← everyone gets this
 state/priorities.json        ← everyone gets this
 brand/brand.json             ← everyone gets this
@@ -494,381 +510,202 @@ state/metrics.json           ← because sales role (needs numbers for pitches)
 
 Same LLM, same repo, different slices. Alice's Claude is an engineering agent. Bob's Claude is a sales agent. Both are formabi.
 
-### The wake as memory
+### Dolt as memory
 
-The LLM doesn't just see the current state. The wake — datom log + git history — gives it temporal awareness:
+The LLM doesn't just see the current state. Dolt's built-in versioning gives it temporal awareness:
 
 ```bash
-# What changed about priorities this quarter?
-git log --oneline -- state/priorities.json
+# What changed about the roster recently?
+dolt log --tables roster
 
-# When was the last customer provisioned?
-git log --oneline -1 -- state/customers.json
+# Who was on the team 3 months ago?
+dolt sql -q "SELECT name, email FROM roster AS OF 'HEAD~10' WHERE active = TRUE"
 
-# Who approved the decision to use datalog?
-git log --oneline -- decisions/002-datalog-architecture.md
+# Diff the customer list between two points
+dolt diff HEAD~5 HEAD --tables customers
 
-# How has the team grown?
-git log --oneline -- people/roster.json
+# When did acme-corp get provisioned?
+dolt log --tables customers --oneline
 ```
 
-Every company decision is a commit. Every entity change is a datom. The LLM can reason about *when* things changed and *who* changed them. The wake is the company's memory — and you can't change it, only add to it.
+Every entity change is a Dolt commit. Every config change is a git commit. The LLM can reason about *when* things changed and *who* changed them.
 
 ### The company bootstrapping itself
 
-Day zero scenario: you have the root repo with identity/, brand/, and an empty roster. You hand the repo to an LLM and say "help me hire the first engineer." The LLM reads mission.md, voice.md, processes.md, stage.json, priorities.json — and it can:
+Day zero scenario: you have the root repo with identity/, brand/, and an empty Dolt database. You hand the repo to an LLM and say "help me hire the first engineer." The LLM reads mission.md, voice.md, processes.md, stage.json, priorities.json — and it can:
 
 1. Draft a job posting in formabi's voice
 2. Suggest what to look for based on the tech stack (decisions/)
-3. Generate the person entry for roster.json once hired
+3. INSERT the person into the roster table once hired
 4. Know what repos to give them access to (roles/)
 5. Generate their onboarding checklist from processes.md
 
 The company literally uses itself to grow itself.
 
-## The Bridge is a REPL for the Company
+## Dolt: The Guild Ledger
 
-The repo is a prompt (read). The bridge is a REPL (read, eval, print, loop). Together they form the complete interface to the company entity.
+### Why Dolt instead of custom tooling
 
-A programming language REPL has: state you can inspect, functions you can call, side effects that change the world, and a print loop that shows you what happened. The bridge has the same thing:
+The formabi product uses datoms — `{ e, a, v, op }` — for form data. But for the company itself, we need something simpler. The problem with a custom datom log:
+- Need to build `formabi-transact` (validate, generate IDs, append)
+- Need to build `formabi-derive` (replay log → JSON views)
+- Custom file format that only custom tools can query
+- LLMs need to learn the intent JSON format
 
-| REPL concept | The bridge |
-|-------------|---------------|
-| **Read** | LLM/human reads state: `jq '.[] \| .name' roster.json`, reads mission.md, reads decisions/ |
-| **Eval** | `formabi-transact '{"action": "add-person", ...}'` — validates, appends datoms, derives state |
-| **Print** | Derived JSON views update, `whoami` shows current state, `halp` shows available commands |
-| **Loop** | Git commit captures the transaction. Next read sees the new state. The cycle continues. |
+Dolt gives us all the properties we want without custom tooling:
 
-### Everything is a transaction against the company
+| What we need | Datom approach | Dolt approach |
+|-------------|---------------|---------------|
+| Structured entity data | Custom log file | SQL tables |
+| Version control | Git tracks the log file | Built into Dolt (branch, merge, diff, log) |
+| Time travel | Replay log to date | `AS OF` clause in SQL |
+| Immutable history | Append-only log | Dolt commit log (immutable) |
+| Query current state | Custom derive → JSON | SQL query directly |
+| LLM interaction | Custom intent JSON → tool → datoms | Standard SQL INSERT/UPDATE |
+| Diffing changes | `git diff` on log file | `dolt diff` with schema awareness |
+| Branching for proposals | Not supported | `dolt checkout -b proposal`, merge when approved |
+| ID generation | Custom ULID tool | Dolt handles it (or use UUID) |
+| Audit trail | Log file + git log | `dolt log`, `dolt blame` |
+
+### How it works
+
+Dolt is a SQL database that versions every change like git. It runs on the server and guild members interact with it via the `dolt` CLI over SSH.
 
 ```bash
-# Query the company
-jq '.[] | select(.roles[] == "engineering")' people/roster.json
-jq '.focus' state/stage.json
-git log --oneline -- log/company.datoms
-
-# Mutate the company
-formabi-transact '{"action": "add-person", "name": "Dave", "roles": ["engineering"]}'
-formabi-transact '{"action": "add-customer", "name": "acme", "tier": "pro"}'
-formabi-transact '{"action": "add-role", "person": "dave@formabi.com", "role": "ops"}'
-
-# The company updates
-formabi-derive          # replay log → update JSON views
-deploy hull       # push state to server — the company's body converges
-
-# The LLM in the shell does the same thing
-# "Hire Dave as an engineer" → Claude builds intent JSON → calls formabi-transact
-# "Provision acme-corp"      → Claude builds intent JSON → calls formabi-transact
-# "Who has ops access?"      → Claude reads roster.json → answers
-# "Why do we use Elm?"       → Claude reads decisions/001 → explains
+# The Dolt database lives on the server
+/srv/formabi/ledger/          ← Dolt repo (the guild ledger)
+├── .dolt/                    ← Dolt internals (like .git/)
+├── roster                    ← table
+├── person_roles              ← table
+├── ssh_keys                  ← table
+└── customers                 ← table
 ```
 
-### The LLM as bridge crew
+### Adding a guild member
 
-In a traditional REPL, a programmer types expressions. On the bridge, the LLM types expressions — but they're company operations, not code. The LLM is the most natural bridge operator because:
+```bash
+# Someone with ops role runs:
+dolt sql -q "
+  INSERT INTO roster (id, name, email, github, region, started)
+  VALUES (UUID(), 'Dave', 'dave@formabi.com', 'dave', 'us-west', '2025-06-01');
+"
 
-- It reads the full state on every session (context assembly from identity/ + state/ + context/)
-- It expresses intent as structured JSON (the language of `formabi-transact`)
-- It never generates IDs (the tool handles that)
-- It reasons about consequences before acting (reads decisions/ for precedent)
-- It commits with explanatory messages (git as audit log)
+dolt sql -q "
+  INSERT INTO person_roles (person_id, role)
+  SELECT id, 'engineering' FROM roster WHERE email = 'dave@formabi.com';
+"
 
-A human on the bridge does the same things, just more manually. The bridge doesn't care who's at the helm — human or LLM. Both read state, both transact, both see results. The company is the ship. The bridge is where you steer it.
+dolt sql -q "
+  INSERT INTO ssh_keys (person_id, key_type, public_key)
+  SELECT id, 'ed25519', 'ssh-ed25519 AAAAC3Nza...'
+  FROM roster WHERE email = 'dave@formabi.com';
+"
 
-Critically: the LLM runs as the user's process. It has the user's filesystem, SSH keys, git identity, and nothing else. It cannot escalate. James's Claude cannot run `deploy hull` because James doesn't have ops access — not because we told Claude not to, but because SSH will reject the connection. The constraint is physical, not policy.
+# Commit the change to Dolt
+dolt add .
+dolt commit -m "add Dave, engineering role"
 
-### Deploy as eval
-
-The bridge is where you compose changes. `deploy hull` is where you eval them against the real world. The hull converges to what the repo says — new users get SSH access, new customers get instances, removed people lose access. Deploy is the moment the company's definition becomes the company's reality. The wake records that it happened.
-
+# Deploy server — NixOS reads from Dolt, converges
+deploy server
 ```
-bridge (command)                        hull (body)
-────────────────                        ────────────
-transact → datoms → derive → JSON  ──deploy──→  NixOS converges
-    │                                            users created/removed
-    │                                            services started/stopped
-    ▼                                            nginx reconfigured
-wake (trail)                                     secrets re-encrypted
-append-only datom log + git commit
+
+Or branch for review:
+
+```bash
+# Propose a hire on a branch
+dolt checkout -b hire-dave
+# ... make the INSERTs above ...
+dolt commit -m "add Dave, engineering role"
+
+# Review the diff
+dolt diff main hire-dave
+
+# Merge when approved
+dolt checkout main
+dolt merge hire-dave
+deploy server
 ```
 
-The gap between "what the repo says" and "what the server is" should always be zero after a deploy. If it's not zero, something drifted. The next deploy fixes it. The repo is always right.
+### Removing a guild member
 
-## The Datom Layer: LLM Intent → Immutable Log → Derived State
-
-### The problem with LLMs editing JSON directly
-
-If an LLM edits roster.json to add a person, it might:
-- Invent a plausible-looking but invalid ULID
-- Accidentally duplicate an ID from elsewhere in the file
-- Produce a valid edit but with no traceable atomic history
-- Make multiple changes in one edit that can't be individually reverted
-
-The JSON files are human-readable views. They shouldn't be the source of truth.
-
-### The solution: datoms all the way down
-
-The formabi product already uses datoms — `{ e, a, v, op }` — for form data. The same model works for the company itself. The LLM expresses intent as plain JSON. A tool converts that to datoms with proper content-addressed IDs. The datom log is append-only and immutable. Current state is derived by replaying the log.
-
+```bash
+dolt sql -q "UPDATE roster SET active = FALSE WHERE email = 'dave@formabi.com'"
+dolt commit -m "offboard Dave"
+deploy server
+# → NixOS removes user, SSH key gone, access revoked
 ```
-LLM intent (JSON)          Tool layer              Datom log (append-only)
-─────────────────    →    ──────────────    →    ─────────────────────────
-                          generates IDs,
-"add person Dave,         validates,              { e: "01HX7K...", a: "person/name",   v: "Dave",              op: true }
- engineering role,        appends datoms          { e: "01HX7K...", a: "person/email",  v: "dave@formabi.com",  op: true }
- dave@formabi.com"                                { e: "01HX7K...", a: "person/role",   v: "engineering",       op: true }
-                                                  { e: "01HX7K...", a: "person/region", v: "us-west",           op: true }
 
-
-Datom log              Derive tool              Current state (JSON views)
-──────────────    →    ──────────────    →    ──────────────────────────────
-                       replays log,
-append-only            produces current          roster.json
-immutable facts        state as JSON             customers.json
-                                                 priorities.json
-                                                 (these are READ-ONLY views)
-```
+Dave's data stays in history — `dolt log` shows when he joined and when he left. No data is deleted, just marked inactive. Time travel still works: `SELECT * FROM roster AS OF 'two months ago'`.
 
 ### What the LLM sees and does
 
-The LLM works with **intent commands** — plain JSON that describes what should change, without IDs:
-
-```json
-// "Hire Dave as an engineer in US West"
-{
-  "action": "add-person",
-  "name": "Dave",
-  "email": "dave@formabi.com",
-  "roles": ["engineering"],
-  "region": "us-west",
-  "started": "2025-06-01"
-}
-```
-
-```json
-// "Provision a new customer workspace"
-{
-  "action": "add-customer",
-  "name": "acme-corp",
-  "domain": "acme.formabi.app",
-  "tier": "pro"
-}
-```
-
-```json
-// "Dave is now also doing ops"
-{
-  "action": "add-role",
-  "person": "dave@formabi.com",
-  "role": "ops"
-}
-```
-
-```json
-// "Remove Dave from the company"
-{
-  "action": "retract-person",
-  "person": "dave@formabi.com"
-}
-```
-
-The LLM never generates entity IDs, never touches the datom log directly, and never edits the derived JSON files. It expresses what should happen. The tool makes it so.
-
-### What the tool does
-
-A `formabi-transact` tool (shell command in the devShell):
-
-1. **Validates** the intent against the current derived state (is the email unique? does the role exist? is the port available?)
-2. **Generates** a ULID for new entities
-3. **Converts** intent to datoms
-4. **Appends** datoms to the log file
-5. **Re-derives** the JSON views (roster.json, customers.json, etc.)
-6. **Commits** both the log and the derived views to git
+The LLM works with standard SQL — no custom format to learn:
 
 ```bash
-# LLM or human runs:
-formabi-transact '{"action": "add-person", "name": "Dave", ...}'
+# "Who has ops access?"
+dolt sql -q "SELECT r.name FROM roster r
+             JOIN person_roles pr ON r.id = pr.person_id
+             WHERE pr.role = 'ops' AND r.active = TRUE"
 
-# Tool does:
-#   1. validates: email not already in roster
-#   2. generates: entity ID 01HX7K...
-#   3. appends to log/company.datoms:
-#        01HX7K... person/name    "Dave"              + 2025-06-01T00:00:00Z
-#        01HX7K... person/email   "dave@formabi.com"  + 2025-06-01T00:00:00Z
-#        01HX7K... person/role    "engineering"        + 2025-06-01T00:00:00Z
-#        01HX7K... person/region  "us-west"            + 2025-06-01T00:00:00Z
-#   4. re-derives: people/roster.json, state/customers.json
-#   5. commits: "add person: Dave (engineering, us-west)"
+# "Hire Dave as an engineer"
+dolt sql -q "INSERT INTO roster ..."
+dolt sql -q "INSERT INTO person_roles ..."
+dolt commit -m "add Dave, engineering role"
+
+# "What changed since last month?"
+dolt diff HEAD~5 HEAD --tables roster
+
+# "Provision acme-corp"
+dolt sql -q "INSERT INTO customers (id, name, domain, port, tier, status, provisioned)
+             VALUES (UUID(), 'acme-corp', 'acme.formabi.app', 3101, 'pro', 'active', CURRENT_DATE)"
+dolt commit -m "provision acme-corp workspace"
+deploy server
 ```
 
-### The log file
+No custom intent JSON. No custom transact tool. Standard SQL that any LLM already knows.
+
+## The Server: The Guild Hall
+
+The server is a single large dedicated machine where everyone works. It's the physical manifestation of the guild — shared workspace, shared tools, shared ledger.
 
 ```
-# log/company.datoms
-# entity              attribute           value                    op  timestamp
-01HX7K2A3B4C5D6E7F   person/name         "Alice"                  +   2024-06-01T00:00:00Z
-01HX7K2A3B4C5D6E7F   person/email        "alice@formabi.com"      +   2024-06-01T00:00:00Z
-01HX7K2A3B4C5D6E7F   person/role         "engineering"            +   2024-06-01T00:00:00Z
-01HX7K2A3B4C5D6E7F   person/role         "ops"                    +   2024-06-01T00:00:00Z
-01HX7K2A3B4C5D6E7F   person/region       "uk"                     +   2024-06-01T00:00:00Z
-01HX7K2A3B4C5D6E7F   person/ssh-key      "ssh-ed25519 AAAA..."    +   2024-06-01T00:00:00Z
-01HY9M4D5E6F7G8H9J   customer/name       "demo"                   +   2025-01-01T00:00:00Z
-01HY9M4D5E6F7G8H9J   customer/domain     "demo.zolanic.space"     +   2025-01-01T00:00:00Z
-01HY9M4D5E6F7G8H9J   customer/port       "3100"                   +   2025-01-01T00:00:00Z
-01HY9M4D5E6F7G8H9J   customer/tier       "free"                   +   2025-01-01T00:00:00Z
-01HZ3P7Q8R9S0T1U2V   person/name         "Dave"                   +   2025-06-01T00:00:00Z
-01HZ3P7Q8R9S0T1U2V   person/email        "dave@formabi.com"       +   2025-06-01T00:00:00Z
-01HZ3P7Q8R9S0T1U2V   person/role         "engineering"            +   2025-06-01T00:00:00Z
-# Dave leaves — retract all his facts
-01HZ3P7Q8R9S0T1U2V   person/name         "Dave"                   -   2025-09-15T00:00:00Z
-01HZ3P7Q8R9S0T1U2V   person/email        "dave@formabi.com"       -   2025-09-15T00:00:00Z
-01HZ3P7Q8R9S0T1U2V   person/role         "engineering"            -   2025-09-15T00:00:00Z
-```
-
-Properties of this log:
-- **Append-only** — you never edit a line, you add retractions (`-`)
-- **Content-addressed** — entity IDs are ULIDs generated by the tool
-- **Time-ordered** — every fact has a timestamp
-- **Git-friendly** — appending lines produces clean diffs
-- **Replayable** — derive current state by replaying from the top, applying `+` and `-`
-- **Time-travelable** — "who worked here on 2025-03-01?" = replay up to that timestamp
-
-### Derived JSON views
-
-The derive tool replays the log and produces read-only JSON:
-
-```bash
-formabi-derive   # replays log/company.datoms → people/roster.json, state/customers.json, etc.
-```
-
-These JSON files are checked into git alongside the log. They're convenience views — you could delete them and regenerate from the log. But having them means:
-- LLMs can read current state without replaying anything
-- Nix can `builtins.fromJSON` without custom tooling
-- `jq` queries work on derived files
-- Git diffs on the JSON show the human-readable effect of datom changes
-
-### Why this matters
-
-| Property | Benefit |
-|----------|---------|
-| LLM never generates IDs | No hallucinated ULIDs, no collisions |
-| Append-only log | Every change is traceable — who, when, what |
-| Retractions not deletions | "Dave left" is a fact in the log, not a missing line |
-| Derived JSON is read-only | LLM reads JSON for state, writes intent for changes |
-| Same model as the product | formabi-app uses datoms for forms, the company uses datoms for itself |
-| Git commit per transaction | `git log -- log/company.datoms` = complete company history |
-| Time travel | "What did the customer list look like last quarter?" = replay to date |
-
-### Directory update
-
-```
-formabi/
-├── log/
-│   └── company.datoms            ← immutable append-only datom log (source of truth)
-├── people/
-│   └── roster.json               ← DERIVED from log (read-only view)
-├── state/
-│   ├── customers.json            ← DERIVED from log (read-only view)
-│   ├── stage.json                ← manually maintained (company-level, not entity-level)
-│   ├── priorities.json           ← manually maintained (ordered list)
-│   └── metrics.json              ← manually maintained or CI-updated
-├── ...
-```
-
-Not everything goes through datoms. `stage.json` and `priorities.json` are high-level company narrative — maintained as plain JSON by humans/LLMs directly. The datom layer is for **entity data** with identity: people, customers, instances — things that have IDs, lifecycle, and relationships.
-
-## How Far Can This Go?
-
-### The Trinity: Hull, Bridge, Wake
-
-The company has three parts. Nautical names — every ship has all three.
-
-```
-       bridge
-       (mind)
-     the shell
-    command here
-       /    \
-      /      \
-   hull ── wake
-  (body)   (trail)
-  server   history
-  runs     remembers
-```
-
-**hull** — the vessel. The physical body of the ship. The NixOS server where the company runs, employees SSH in, customer instances serve traffic. What formabi IS, as a running system. `deploy hull`. `ssh hull.formabi.com`.
-
-**bridge** — the command center. Where the captain stands, sees everything, gives orders. The formabi shell — locally via `nix develop`, on the server via SSH. The REPL. Where humans and LLMs query, transact, and steer the company. `bridge` to enter.
-
-**wake** — the trail left behind the ship. You can't change your wake — it's already in the water. The datom log, git history, decision records. Append-only, immutable, the trace of every course the company has ever taken. `wake log`. `wake diff 2025-01 2025-06`. `wake replay --at 2025-03-01`.
-
-They're interdependent:
-- **bridge** reads from **wake** (the shell shows current state derived from history)
-- **bridge** writes to **wake** (every transaction appends datoms, every commit adds to git)
-- **hull** is derived from **wake** (deploy reads the log-derived state and converges the server)
-- **bridge** commands **hull** (`deploy hull` pushes the current truth onto the body)
-
-#### As CLI
-
-```bash
-bridge                              # enter the formabi shell
-bridge --as mei                     # enter as specific person (for context assembly)
-
-deploy hull                         # push current state to the server
-
-wake log                            # show datom history
-wake log --entity mei@formabi.com   # show all facts about Mei over time
-wake diff 2025-01 2025-06           # what changed: who joined, customers added, decisions made
-wake replay --at 2025-03-01         # derive state as of a specific date
-wake query "person/role = ops"      # find all entities with ops role
-```
-
-#### On the server
-
-```
-hull.formabi.com                        ← the company (NixOS)
-├── /home/mei/                          ← employee home dirs
+server.formabi.com                      ← the guild hall (NixOS)
+├── /home/mei/                          ← guild member home dirs
 ├── /home/alice/
+├── /srv/formabi/ledger/                ← Dolt database (the guild ledger)
 ├── /srv/formabi/demo/                  ← customer instance
 ├── /srv/formabi/acme-corp/             ← customer instance
 └── /srv/repos/                         ← bare clones of company repos
 ```
 
 Two separate concerns on one box:
-- **hull** = the company as a unix system (employees, repos, tools, company state)
-- **formabi instances** = the product serving customers (systemd services, postgres DBs, nginx vhosts)
+- **Guild workspace** = the company as a unix system (members, repos, tools, Dolt ledger)
+- **Formabi instances** = the product serving customers (systemd services, postgres DBs, nginx vhosts)
 
 They share a server for now. They could split to separate machines later. The nix configs are already separate modules.
 
-### Layer 1: Employees as Unix Users
+### Layer 1: Guild Members as Unix Users
 
-The datom log is the source of truth. NixOS derives unix users from it. Classic unix tools — SSH keys, home dirs, groups, permissions — do the enforcement.
+The Dolt roster is the source of truth. NixOS derives unix users from it. Classic unix tools — SSH keys, home dirs, groups, permissions — do the enforcement.
 
-#### Adding an employee
+#### Adding a guild member
 
 ```bash
-# 1. Someone with ops role transacts (from their local shell)
-formabi-transact '{
-  "action": "add-person",
-  "name": "Mei Lin",
-  "email": "mei@formabi.com",
-  "github": "meilin",
-  "roles": ["engineering"],
-  "region": "singapore",
-  "started": "2025-06-02",
-  "sshKeys": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... mei@formabi.com"]
-}'
+# 1. Someone with ops role adds to Dolt (from the server)
+dolt sql -q "INSERT INTO roster ..."
+dolt sql -q "INSERT INTO person_roles ..."
+dolt sql -q "INSERT INTO ssh_keys ..."
+dolt commit -m "add Mei Lin, engineering role"
 
-# 2. Datoms appended, roster.json derived, committed
-# 3. Deploy
-deploy hull
+# 2. Deploy
+deploy server
 ```
 
-What NixOS does on `hull` when the config is applied:
+What NixOS does when the config is applied:
 
 ```
 creates user: mei
-  uid:    deterministic from roster position
+  uid:    deterministic from roster
   home:   /home/mei/
   shell:  /bin/bash (with role-appropriate profile)
   groups: [ formabi engineering ]
@@ -881,7 +718,7 @@ writes: /home/mei/.claude-context.md
 
 creates: /home/mei/.bashrc
   → PS1 showing role, formabi commands in PATH
-  → whoami, halp, formabi-transact (if role allows)
+  → whoami, halp, dolt (if role allows)
 
 links: /home/mei/repos/formabi-app → /srv/repos/formabi-app
 links: /home/mei/repos/latice → /srv/repos/latice
@@ -894,55 +731,54 @@ does NOT create: /home/mei/repos/deck (not her role)
 Mei can now SSH in:
 
 ```
-mei@laptop:~$ ssh mei@hull.formabi.com
+mei@laptop:~$ ssh mei@server.formabi.com
 
-Welcome to hull — Formabi company server
-Person: Mei Lin | Role: engineering | Region: singapore
+Welcome to the Formabi guild hall
+Member: Mei Lin | Role: engineering | Region: singapore
 
-mei@hull:~$ ls repos/
+mei@server:~$ ls repos/
 formabi-app/  latice/
 
-mei@hull:~$ ls /home/
+mei@server:~$ ls /home/
 alice/  mei/
 
-mei@hull:~$ ls /home/alice/
+mei@server:~$ ls /home/alice/
 ls: cannot open directory '/home/alice/': Permission denied
 
-mei@hull:~$ whoami
-Person:  Mei Lin
+mei@server:~$ whoami
+Member:  Mei Lin
 Roles:   engineering
 Region:  singapore
-Server:  hull.formabi.com
 Home:    /home/mei
 
-mei@hull:~$ halp
+mei@server:~$ halp
 Available commands:
   whoami          Your identity and roles
   halp            This help
-  formabi-derive  Replay datom log → update views (read-only for you)
+  dolt sql        Query the guild ledger (read-only for you)
 
 Not available (requires ops role):
-  formabi-transact
+  dolt commit
   deploy
 ```
 
-#### Removing an employee
+#### Removing a guild member
 
 ```bash
-# 1. Ops role retracts
-formabi-transact '{"action": "retract-person", "person": "mei@formabi.com"}'
+# 1. Ops role marks inactive
+dolt sql -q "UPDATE roster SET active = FALSE WHERE email = 'mei@formabi.com'"
+dolt commit -m "offboard Mei Lin"
 
-# 2. Datom log gets retraction lines, roster.json re-derived (Mei gone), committed
-# 3. Deploy
-deploy hull
+# 2. Deploy
+deploy server
 ```
 
 What NixOS does:
 
 ```
-user 'mei' no longer in config
+user 'mei' no longer in active roster
 
-  → archives /home/mei/ to /var/archive/employees/mei-2025-09-15/
+  → archives /home/mei/ to /var/archive/members/mei-2025-09-15/
   → removes user 'mei' from /etc/passwd
   → removes mei from 'engineering' and 'formabi' groups
   → SSH authorized_keys gone (no user = no file)
@@ -952,34 +788,34 @@ user 'mei' no longer in config
 Mei tries to SSH:
 
 ```
-mei@laptop:~$ ssh mei@hull.formabi.com
-mei@hull.formabi.com: Permission denied (publickey).
+mei@laptop:~$ ssh mei@server.formabi.com
+mei@server.formabi.com: Permission denied (publickey).
 ```
 
-Done. No manual steps. No "did we remember to revoke her access?" The datom log says she's retracted. The derived roster has no Mei. The NixOS config has no user. SSH rejects. It's the same declarative convergence as everything else.
+Done. No manual steps. No "did we remember to revoke her access?" The Dolt roster says she's inactive. The NixOS config has no user. SSH rejects. Declarative convergence.
 
-#### The home directory is the employee's bridge — on the hull
+#### The home directory is the member's workspace
 
 The local shell and the server home dir are the same concept at different locations:
 
 ```
-Local (mei's laptop)                    Server (hull)
+Local (mei's laptop)                    Server
 ────────────────────                    ──────────────
 ~/formabi/                              /home/mei/
 ├── .claude-context.md                  ├── .claude-context.md
 ├── formabi-app/ (cloned)               ├── repos/formabi-app/ (linked)
 ├── latice/ (cloned)                    ├── repos/latice/ (linked)
-└── (nix develop for tools)             └── (NixOS profile for tools)
+└── (devenv for tools)                  └── (NixOS profile for tools)
 ```
 
-Same person, same role, same context, same repos. Whether Mei is working locally or SSH'd into hull, she sees the same world. The only difference: locally she has `nix develop`, on the server NixOS manages her environment declaratively.
+Same person, same role, same context, same repos. Whether Mei is working locally or SSH'd into the server, she sees the same world. The only difference: locally she has `devenv`, on the server NixOS manages her environment declaratively.
 
 #### Unix groups from roles
 
 ```nix
-# Derived from roster.json + roles
+# Derived from Dolt roster + roles
 users.groups = {
-  formabi = {};        # everyone in the company
+  formabi = {};        # everyone in the guild
   engineering = {};    # engineering role
   ops = {};            # ops role — can sudo, manage deploys
   sales = {};          # sales role
@@ -1018,17 +854,17 @@ File permissions follow naturally:
 
 James (sales group) physically cannot read `/srv/repos/formabi-app/`. Not because a policy says so — because unix permissions say `750` and he's not in the `engineering` group. Same constraint as locally: if you can't see it, the LLM running as you can't see it either.
 
-#### The full picture: datom → roster → NixOS → unix
+#### The full picture: Dolt → NixOS → unix
 
 ```
-datom log                   formabi-derive              NixOS config
-(source of truth)    →     (replay + derive)     →     (declarative)
+Dolt ledger                 Export                      NixOS config
+(source of truth)    →     (dolt sql -r json)    →     (declarative)
                                                               │
-+ mei person/name "Mei"    roster.json updated          users.users.mei = { ... }
-+ mei person/role "eng"    (Mei appears)                users.groups.engineering.members
-+ mei person/ssh-key "..."                              /home/mei/.ssh/authorized_keys
+INSERT roster: Mei         roster.json exported         users.users.mei = { ... }
+INSERT role: eng           (for nix to read)            users.groups.engineering.members
+INSERT ssh_key: "..."                                   /home/mei/.ssh/authorized_keys
                                                               │
-                                                        deploy hull
+                                                        deploy server
                                                               │
                                                         NixOS applies:
                                                           useradd mei
@@ -1040,11 +876,11 @@ datom log                   formabi-derive              NixOS config
 ```
 
 ```
-- mei person/name "Mei"    roster.json updated          users.users.mei GONE
-- mei person/role "eng"    (Mei gone)                   groups updated
-- mei person/ssh-key "..."                              no authorized_keys
+UPDATE roster: active=FALSE roster.json exported         users.users.mei GONE
+                           (Mei gone)                   groups updated
+                                                        no authorized_keys
                                                               │
-                                                        deploy hull
+                                                        deploy server
                                                               │
                                                         NixOS applies:
                                                           archive /home/mei
@@ -1053,13 +889,13 @@ datom log                   formabi-derive              NixOS config
                                                           unlink repos
 ```
 
-One pipeline. Datom in, unix out. The company manages its employees the same way NixOS manages its packages — declaratively, reproducibly, with full rollback via git.
+One pipeline. Dolt in, unix out. The guild manages its members the same way NixOS manages its packages — declaratively, reproducibly, with full rollback via Dolt + git.
 
 ### Layer 2: Secrets (agenix, scoped by role)
 
 **Today (cmdr)**: `secrets.nix` has a hardcoded list of who can decrypt what.
 
-**With root flake**: Derived from people + roles:
+**With root flake**: Derived from Dolt roster + roles:
 
 ```nix
 # secrets/secrets.nix — who can decrypt what
@@ -1081,51 +917,41 @@ in {
 
 Add a person with ops role → they can decrypt production secrets. Remove them → they can't. No manual secret re-encryption lists.
 
-### Layer 3: Product Instances (customers as data)
+### Layer 3: Product Instances (customers as Dolt data)
 
 **Today (cmdr)**: `formabi-instances.nix` declares `{ demo = { port = 3100; }; }`. The `deploy-formabi` script creates DB, env file, and deploys.
 
-**With root flake**: Same pattern, but richer. Each instance is a nix attrset:
+**With root flake**: Customer data lives in Dolt, exported to JSON for Nix to consume:
 
-```nix
-# server/instances.nix
-{
-  demo = {
-    port = 3100;
-    domain = "demo.zolanic.space";
-    tier = "free";
-  };
-  acme-corp = {
-    port = 3101;
-    domain = "acme.formabi.app";
-    tier = "pro";
-    provisioned = "2025-01-15";
-  };
-}
+```bash
+# Export customers for Nix
+dolt sql -q "SELECT name, domain, port, tier, status, provisioned
+             FROM customers WHERE status = 'active'" -r json > /tmp/customers.json
 ```
 
-This feeds:
-- **systemd services** (one per instance, same as today)
-- **nginx vhosts** (domain + SSL per instance)
-- **PostgreSQL databases** (one per instance)
-- **Monitoring** (alerts scoped to tier/SLA)
-- **Billing data** (tier → what to invoice, exported as JSON for accounting)
+```nix
+# server/instances.nix — reads exported customer data
+let
+  customers = builtins.fromJSON (builtins.readFile ./customers-export.json);
+in
+  # generates systemd services, nginx vhosts, postgres DBs per customer
+```
 
-New customer = add an attrset, deploy. The server converges to include them.
+New customer = INSERT into Dolt, export, deploy. The server converges to include them.
 
-### Layer 4: The Server as the Company's Body
+### Layer 4: The Server as the Guild Hall
 
-The NixOS server configuration becomes a pure function of the root flake:
+The NixOS server configuration becomes a pure function of the root flake + Dolt data:
 
 ```nix
 # flake.nix (server output)
-nixosConfigurations.hull = nixpkgs.lib.nixosSystem {
+nixosConfigurations.server = nixpkgs.lib.nixosSystem {
   modules = [
-    ./server/hull/configuration.nix
-    ./server/hull/hardware-configuration.nix
+    ./server/configuration.nix
+    ./server/hardware-configuration.nix
     ./server/shared/common.nix
     (import ./server/shared/users.nix { inherit people roles; })
-    (import ./server/shared/formabi.nix { inherit instances; })
+    (import ./server/shared/formabi.nix { inherit customers; })
     (import ./server/shared/services.nix { inherit brand; })
     agenix.nixosModules.default
   ];
@@ -1133,11 +959,11 @@ nixosConfigurations.hull = nixpkgs.lib.nixosSystem {
 ```
 
 Everything on the server is derived from the root flake's data:
-- **Users** ← people/*.nix
+- **Users** ← Dolt roster
 - **SSH access** ← roles (serverAccess)
 - **Secrets** ← roles (secretAccess)
-- **Product instances** ← server/instances.nix
-- **Nginx vhosts** ← instances + brand (domains, SSL)
+- **Product instances** ← Dolt customers
+- **Nginx vhosts** ← customers + brand (domains, SSL)
 - **Analytics** ← brand (plausible config)
 - **Static sites** ← deck, zolanic packages
 
@@ -1168,7 +994,7 @@ This produces a CLAUDE.md + tool configuration for an AI agent that:
 
 The agent definition lives in git. Its permissions are auditable. If you change the agent's capabilities, that's a PR with a reviewer.
 
-**Per-person agent context**: When alice runs Claude Code on her bridge, the CLAUDE.md is assembled from her specific roles. The AI literally becomes a different agent depending on who is asking.
+**Per-person agent context**: When alice runs Claude Code on the server, the CLAUDE.md is assembled from her specific roles. The AI literally becomes a different agent depending on who is asking.
 
 ### Layer 6: Company Knowledge as Nix Packages
 
@@ -1180,7 +1006,7 @@ packages.handbook = buildHandbook {
   inherit brand;
   people = import ./people;    # team page auto-generated
   roles = import ./roles;      # role descriptions included
-  instances = import ./server/instances.nix;  # customer list for internal reference
+  customers = import ./server/instances.nix;  # customer list for internal reference
 };
 
 packages.decks = buildDecks {
@@ -1189,7 +1015,7 @@ packages.decks = buildDecks {
 };
 ```
 
-The handbook is not a static doc someone maintains. It's **derived from the same data** that configures the servers and shells. The team page is always accurate because it reads `people/*.nix`. The architecture diagram is always current because it reads the module definitions.
+The handbook is not a static doc someone maintains. It's **derived from the same data** that configures the servers and shells. The team page is always accurate because it reads the Dolt roster. The architecture diagram is always current because it reads the module definitions.
 
 ### Layer 7: CI/CD Derived from Modules
 
@@ -1211,23 +1037,23 @@ When you add a new module, its CI pipeline exists automatically. No manually con
 
 ### Layer 8: Company Health as a Nix Evaluation
 
-```nix
-# scripts/health.sh — queries the company's state
+```bash
+# scripts/health.sh — queries the guild's state
 health() {
-  echo "People:    $(ls people/*.nix | wc -l) active"
+  echo "Members:   $(dolt sql -q 'SELECT COUNT(*) FROM roster WHERE active = TRUE' -r csv | tail -1)"
   echo "Roles:     $(ls roles/*.nix | grep -v default | wc -l) defined"
   echo "Modules:   $(ls modules/*.nix | wc -l) registered"
-  echo "Instances: $(nix eval .#instances --json | jq length) customer workspaces"
-  echo "Server:    $(ssh hull uptime)"
+  echo "Customers: $(dolt sql -q 'SELECT COUNT(*) FROM customers WHERE status = \"active\"' -r csv | tail -1)"
+  echo "Server:    $(ssh server uptime)"
   echo "Last deploy: $(git log --oneline -1 -- server/)"
 }
 ```
 
-The company's vital signs are queryable from the bridge. Not a dashboard — a function.
+The guild's vital signs are queryable from the shell. Not a dashboard — a function.
 
-### Layer 9: Browser Access — Forgejo as the Glass Bridge
+### Layer 9: Browser Access — Forgejo as the Glass Window
 
-The bridge (CLI shell) is powerful but not everyone lives in a terminal. Marketing, sales, new hires — they need to view and edit company content from a browser or phone. The source of truth stays in git (the wake), but we add a glass layer on top.
+The CLI shell is powerful but not everyone lives in a terminal. Marketing, sales, new hires — they need to view and edit company content from a browser or phone. The source of truth stays in git and Dolt, but we add a browser layer on top.
 
 #### The problem
 
@@ -1238,28 +1064,28 @@ The formabi system already serves static content well:
 
 But this is **read-only**. A sales person can view decks but can't fix a typo without SSH + git CLI + vim. We need browser-based editing that still commits to git.
 
-#### The solution: Forgejo on hull
+#### The solution: Forgejo on the server
 
 **Forgejo** — a lightweight, self-hosted git forge (community fork of Gitea). Runs as a single binary. NixOS has a module for it. It gives you:
 
 - **Web UI for git** — browse repos, view markdown rendered, see commit history
-- **In-browser editing** — click a file, edit, commit. Each edit is a real git commit in the wake.
+- **In-browser editing** — click a file, edit, commit. Each edit is a real git commit.
 - **Mobile-friendly** — responsive web UI, works on phone
 - **Pull requests** — non-technical people can propose changes, someone reviews
 - **API** — webhooks on push to trigger nix rebuilds
-- **User management** — derives from roster.json (same people, same roles)
+- **User management** — derives from Dolt roster (same people, same roles)
 
 ```
-forgejo.formabi.com                     ← web UI for the company's repos
-├── formabi/formabi (root repo)         ← edit identity/, state/, decisions/ in browser
-├── formabi/deck (pitch decks)          ← marketing edits slides in browser
-└── formabi/handbook                    ← anyone can fix a typo via PR
+code.formabi.com                       ← web UI for the guild's repos
+├── formabi/formabi (root repo)        ← edit identity/, state/, decisions/ in browser
+├── formabi/deck (pitch decks)         ← marketing edits slides in browser
+└── formabi/handbook                   ← anyone can fix a typo via PR
 ```
 
 #### How it works
 
 ```
-James (sales, phone)              Forgejo                    Wake              Hull
+James (sales, phone)              Forgejo                    Git               Server
 ─────────────────────    →    ──────────────    →    ──────────────    →    ──────
                               browser editor
 "fix typo in investor          edit file,               git commit           webhook
@@ -1271,7 +1097,7 @@ James (sales, phone)              Forgejo                    Wake              H
                                                                             deck.zolanic.space
 ```
 
-The source of truth never changes — it's still git, still the wake. Forgejo is just a browser-shaped bridge. Every edit through Forgejo is a git commit with the person's identity. `wake log` shows it the same as any CLI commit.
+The source of truth never changes — it's still git and Dolt. Forgejo is just a browser-shaped window into the guild. Every edit through Forgejo is a git commit with the person's identity. `git log` shows it the same as any CLI commit.
 
 #### NixOS config
 
@@ -1299,17 +1125,17 @@ The source of truth never changes — it's still git, still the wake. Forgejo is
 }
 ```
 
-Users are provisioned from roster.json — same people, same roles, same permissions. A sales person sees the repos their role grants. An engineer sees engineering repos. The glass bridge respects the same boundaries as the CLI bridge.
+Users are provisioned from the Dolt roster — same people, same roles, same permissions. A sales person sees the repos their role grants. An engineer sees engineering repos. The browser window respects the same boundaries as the CLI.
 
 #### Webhook → rebuild pipeline
 
 When someone edits a file through Forgejo:
 
 1. Forgejo commits to the repo (a real git commit)
-2. Webhook fires to a small rebuild service on hull
+2. Webhook fires to a small rebuild service on the server
 3. Service runs `nix build` for the affected package (deck, handbook, etc.)
 4. Nginx serves the new build
-5. The wake records the change (it's a git commit)
+5. Git records the change
 
 For the deck repo, this means: James fixes a typo on his phone → 30 seconds later → `deck.zolanic.space` has the fix. No deploy command needed. The webhook + nix build pipeline handles it.
 
@@ -1325,14 +1151,14 @@ For the deck repo, this means: James fixes a typo on his phone → 30 seconds la
 
 #### What Forgejo does NOT replace
 
-- **The bridge (CLI)** — `formabi-transact`, `deploy hull`, `wake query` stay CLI-only. These are power tools for people on the bridge.
-- **The wake** — Forgejo writes to git, which IS the wake. It doesn't have its own history.
-- **The hull config** — server changes still go through `deploy hull` from a CLI with ops access.
-- **Claude Code** — LLM interaction stays in the terminal bridge. Forgejo is for humans with browsers.
+- **The CLI** — `dolt sql`, `deploy server`, `dolt log` stay CLI-only. These are power tools.
+- **Dolt** — entity data stays in Dolt. Forgejo is for git-tracked files only.
+- **The server config** — server changes still go through `deploy server` from a CLI with ops access.
+- **Claude Code** — LLM interaction stays in the terminal. Forgejo is for humans with browsers.
 
-Forgejo is the **glass bridge** — you can see and touch the same things, but through a window. The real bridge (CLI) has the full controls.
+Forgejo is a **glass window** — you can see and touch the same things, but through glass. The CLI has the full controls.
 
-#### Other browser tools on hull
+#### Other browser tools on the server
 
 Forgejo handles editing. For read-only access, the existing pattern works:
 
@@ -1345,36 +1171,38 @@ Forgejo handles editing. For read-only access, the existing pattern works:
 | Secret sharing | privatebin | NixOS service | yo.zolanic.space |
 | Code / editing | forgejo | NixOS service | code.formabi.com |
 
-Everything is a NixOS service on hull, declared in nix, served by nginx with ACME SSL. Add a new service = add a nix module + nginx vhost, deploy.
+Everything is a NixOS service on the server, declared in nix, served by nginx with ACME SSL. Add a new service = add a nix module + nginx vhost, deploy.
 
-## Onboarding: Two New Employees
+## Onboarding: Two New Guild Members
 
 Before either person starts, someone with ops access has already run:
 
 ```bash
-formabi-transact '{
-  "action": "add-person",
-  "name": "Mei Lin",
-  "email": "mei@formabi.com",
-  "github": "meilin",
-  "roles": ["engineering"],
-  "region": "singapore",
-  "started": "2025-06-02",
-  "sshKeys": ["ssh-ed25519 AAAAC3Nza... mei@formabi.com"]
-}'
+dolt sql -q "
+  INSERT INTO roster (id, name, email, github, region, started)
+  VALUES
+    (UUID(), 'Mei Lin', 'mei@formabi.com', 'meilin', 'singapore', '2025-06-02'),
+    (UUID(), 'James', 'james@formabi.com', 'jamesw', 'uk', '2025-06-02');
+"
 
-formabi-transact '{
-  "action": "add-person",
-  "name": "James",
-  "email": "james@formabi.com",
-  "github": "jamesw",
-  "roles": ["sales"],
-  "region": "uk",
-  "started": "2025-06-02"
-}'
+dolt sql -q "
+  INSERT INTO person_roles (person_id, role)
+  SELECT id, 'engineering' FROM roster WHERE email = 'mei@formabi.com'
+  UNION ALL
+  SELECT id, 'sales' FROM roster WHERE email = 'james@formabi.com';
+"
+
+dolt sql -q "
+  INSERT INTO ssh_keys (person_id, key_type, public_key)
+  SELECT id, 'ed25519', 'ssh-ed25519 AAAAC3Nza... mei@formabi.com'
+  FROM roster WHERE email = 'mei@formabi.com';
+"
+
+dolt commit -m "add Mei Lin (engineering, singapore) and James (sales, uk)"
+deploy server
 ```
 
-Datoms appended, roster.json derived, committed, deployed. They exist in the company before they've touched a keyboard.
+They exist in the guild before they've touched a keyboard.
 
 ---
 
@@ -1389,14 +1217,14 @@ mei@laptop:~/formabi$ nix develop
 
 formabi shell — 0 of 5 modules active
 
-  base: git, jq, halp, whoami, onboard
+  base: git, dolt, jq, halp, whoami, onboard
 
 Run 'onboard' to get started.
 
 mei@laptop:~/formabi$ onboard
 ```
 
-The onboard script detects her git email, matches it to the roster, and starts a chat session with the LLM. The LLM has the full company context loaded.
+The onboard script detects her git email, queries the Dolt roster, and starts a chat session with the LLM. The LLM has the full company context loaded.
 
 ```
 ─────────────────────────────────────────────
@@ -1413,9 +1241,6 @@ The onboard script detects her git email, matches it to the roster, and starts a
   Formabi makes complex forms easy. We're a small team of product
   engineers — one per region, follow-the-sun. You own Asia-Pacific.
   The person who builds it is the person who ships it to the customer.
-
-  Your role means you'll be building the product, running customer
-  integrations, and working with regional sales in your timezone.
 
   Current priorities (from state/priorities.json):
     1. Ship form engine v1 — complete fill/submit flow
@@ -1520,13 +1345,13 @@ mei@laptop:~/formabi$ nix develop
 
 formabi shell — 2 of 5 modules active
 
-  base:   git, jq, halp, whoami, onboard
+  base:   git, dolt, jq, halp, whoami, onboard
   app:    elm, node, cargo, dev, test, build
   latice: cargo, buf, protobuf
 
 mei@laptop:~/formabi$ whoami
 
-Person:  Mei Lin
+Member:  Mei Lin
 Roles:   engineering
 Region:  singapore
 Modules: 2/5 active
@@ -1563,7 +1388,7 @@ james@laptop:~/formabi$ nix develop
 
 formabi shell — 0 of 5 modules active
 
-  base: git, jq, halp, whoami, onboard
+  base: git, dolt, jq, halp, whoami, onboard
 
 james@laptop:~/formabi$ onboard
 ```
@@ -1648,7 +1473,7 @@ james@laptop:~/formabi$ onboard
 
   ─── current customers ──────────────────
 
-  From state/customers.json:
+  From the guild ledger:
 
   demo  — demo.zolanic.space — free tier — active since 2025-01-01
     This is our demo instance. Use it for prospect demos.
@@ -1668,8 +1493,9 @@ james@laptop:~/formabi$ onboard
 
   - Async-first. Context-rich messages, not quick Slack pings.
   - You and Alice close deals together. You qualify, she demos.
-  - When you land a customer, it becomes a datom:
-      formabi-transact '{"action": "add-customer", "name": "...", "tier": "pro"}'
+  - When you land a customer, it becomes a Dolt entry:
+      dolt sql -q "INSERT INTO customers ..."
+      dolt commit -m "provision acme-corp"
     That provisions their workspace on the server. No tickets, no ops team.
 
   ─── people ─────────────────────────────
@@ -1692,12 +1518,12 @@ james@laptop:~/formabi$ nix develop
 
 formabi shell — 1 of 5 modules active
 
-  base: git, jq, halp, whoami, onboard
+  base: git, dolt, jq, halp, whoami, onboard
   deck: marp, build-deck, present
 
 james@laptop:~/formabi$ whoami
 
-Person:  James
+Member:  James
 Roles:   sales
 Region:  uk
 Modules: 1/5 active
@@ -1729,13 +1555,13 @@ james@laptop:~/formabi$ claude
 
 ### What just happened
 
-Both employees started from the same place: `git clone`, `bridge`, `onboard`. The system:
+Both guild members started from the same place: `git clone`, `nix develop`, `onboard`. The system:
 
-1. **Identified them** from roster.json (matched by git email)
+1. **Identified them** from the Dolt roster (matched by git email)
 2. **Scoped their experience** by role — different repos, different tools, different context
-3. **Oriented them** to the company — mission, stage, priorities, team, how we work
+3. **Oriented them** to the guild — mission, stage, priorities, team, how we work
 4. **Got them productive** — specific repos to clone, specific first-week tasks
-5. **Shaped their AI** — Claude Code on each person's bridge is a different agent
+5. **Shaped their AI** — Claude Code for each person is a different agent
 
 Mei's Claude is an engineering agent that knows Elm, datoms, and the fill/submit flow.
 James's Claude is a sales agent that knows the pitch, the demo, and the customer pipeline.
@@ -1749,7 +1575,7 @@ Neither can see the other's world. Neither LLM can exceed its user's permissions
 | Claude context | architecture, datoms, code patterns | pitch, product positioning, customers |
 | First task | Ship code for fill/submit flow | Build prospect list, prep first demo |
 | Doesn't see | deploy scripts, pitch decks, brand site | source code, server config, Elm internals |
-| Can't do | deploy (no ops role, no SSH key) | transact customers (no ops role), push to formabi-app (no GitHub access) |
+| Can't do | deploy (no ops role, no SSH key) | write to Dolt (no ops role), push to formabi-app (no GitHub access) |
 | LLM bounded by | Mei's filesystem, SSH keys, git identity | James's filesystem, SSH keys, git identity |
 
 ## What This Looks Like Day-to-Day
@@ -1757,18 +1583,16 @@ Neither can see the other's world. Neither LLM can exceed its user's permissions
 ### Hiring someone
 
 ```bash
-# 1. Create person file
-vim people/dave.nix
-# { name = "Dave"; github = "dave"; roles = [ "engineering" ]; sshKeys = [ "ssh-ed25519 ..." ]; }
+# 1. Add to Dolt
+dolt sql -q "INSERT INTO roster ..."
+dolt sql -q "INSERT INTO person_roles ..."
+dolt sql -q "INSERT INTO ssh_keys ..."
+dolt commit -m "add dave, engineering role"
 
-# 2. PR, review, merge
-git add people/dave.nix && git commit -m "add dave, engineering role"
-git push  # PR → review → merge
+# 2. Deploy server (dave gets SSH access based on role)
+deploy server
 
-# 3. Deploy server (dave gets SSH if his role warrants it)
-deploy hull
-
-# 4. Dave clones root repo, runs onboard
+# 3. Dave clones root repo, runs onboard
 # dave$ git clone ... && cd formabi && nix develop
 # dave$ onboard
 # → "Your roles: engineering. Clone formabi-app and latice."
@@ -1777,26 +1601,25 @@ deploy hull
 ### Offboarding someone
 
 ```bash
-# 1. Remove person file
-git rm people/dave.nix
-git commit -m "offboard dave"
-git push  # PR → review → merge
+# 1. Mark inactive
+dolt sql -q "UPDATE roster SET active = FALSE WHERE email = 'dave@formabi.com'"
+dolt commit -m "offboard dave"
 
 # 2. Deploy
-deploy hull
+deploy server
 # → dave's unix user removed, SSH key gone, secret access revoked
 ```
 
 ### Adding a customer
 
 ```bash
-# 1. Add instance
-vim server/instances.nix
-# acme = { port = 3101; domain = "acme.formabi.app"; tier = "pro"; };
+# 1. Add to Dolt
+dolt sql -q "INSERT INTO customers (id, name, domain, port, tier, status, provisioned)
+             VALUES (UUID(), 'acme-corp', 'acme.formabi.app', 3101, 'pro', 'active', CURRENT_DATE)"
+dolt commit -m "provision acme-corp workspace"
 
-# 2. Commit, deploy
-git commit -am "provision acme-corp workspace"
-deploy hull
+# 2. Deploy
+deploy server
 # → systemd service created, nginx vhost created, SSL provisioned, DB created
 ```
 
@@ -1809,8 +1632,8 @@ vim roles/engineering.nix
 
 # 2. Commit, deploy
 git commit -am "grant engineers read-only server access"
-deploy hull
-# → all engineers now have SSH access (no sudo). Derived from their person files.
+deploy server
+# → all engineers now have SSH access (no sudo). Derived from their roster entries.
 ```
 
 ## Security Model
@@ -1822,8 +1645,8 @@ The LLM never has more permissions than the active user. This isn't enforced by 
 | What the LLM tries to do | What actually constrains it |
 |---------------------------|----------------------------|
 | Read source code | Can only read files on disk. User hasn't cloned the repo? Files don't exist. LLM can't read what isn't there. |
-| Run `formabi-transact` | Tool validates against roster.json. User's git email must match a person with a role that permits the action. No role = transaction rejected. |
-| Run `deploy hull` | Requires SSH key on the server. Server users derived from roster.json + roles. No ops role = no SSH key = deploy fails. |
+| Write to Dolt | Dolt runs on the server. User must SSH in. No ops role = no SSH key = no connection. |
+| Run `deploy server` | Requires SSH key on the server. Server users derived from Dolt roster + roles. No ops role = no SSH key = deploy fails. |
 | Decrypt a secret | agenix requires the user's age key. No secretAccess in role = key not in the encryption list = decryption fails. |
 | Push to a repo | Requires GitHub write access. User's GitHub account doesn't have access = push rejected. |
 | See context for another role | CLAUDE.md assembled from modules on disk. No repo cloned = no context fragment included. |
@@ -1834,9 +1657,9 @@ The enforcement is **physical, not policy**. The LLM runs as a process in the us
 
 The sanctum is the smallest, most privileged access zone: the people who have full access to application source code and the NixOS environment. Their identities and SSH keys are defined directly in the nix config. This is the hardest boundary — you're either in the sanctum or you're not.
 
-Who belongs here: product engineers, and potentially a small number of infra people. Nobody else. This group should stay as small as possible. Every person in the sanctum can read all source, modify the NixOS configuration, and deploy. They are the people who can change what the company *is*, not just what it *does*.
+Who belongs here: product engineers, and potentially a small number of infra people. Nobody else. This group should stay as small as possible. Every person in the sanctum can read all source, modify the NixOS configuration, and deploy. They are the people who can change what the guild *is*, not just what it *does*.
 
-The sanctum is controlled by nix, not by policy. If your SSH key isn't in the config, you don't have access — there's no override, no admin panel, no escalation path. Adding someone to the sanctum is a nix change, committed to git, reviewed in a PR, deployed. Removing them is the same. The wake records both.
+The sanctum is controlled by nix, not by policy. If your SSH key isn't in the config, you don't have access — there's no override, no admin panel, no escalation path. Adding someone to the sanctum is a nix change, committed to git, reviewed in a PR, deployed. Removing them is the same.
 
 ### Layer summary
 
@@ -1845,29 +1668,30 @@ The sanctum is controlled by nix, not by policy. If your SSH key isn't in the co
 | Code access | GitHub repo permissions | Can't clone = can't see |
 | Local tools | builtins.pathExists | No repo on disk = no tools |
 | LLM permissions | Runs as user's process | LLM = user, always |
-| Transact access | formabi-transact validates git email + role | No matching role = rejected |
-| Server access | Derived from people + roles | serverAccess field → SSH key or nothing |
+| Dolt access | Server-side, requires SSH | No ops role = no SSH = no writes |
+| Server access | Derived from Dolt roster + roles | serverAccess field → SSH key or nothing |
 | Secret access | agenix + derived from roles | secretAccess field → age key or nothing |
 | AI context | Assembled from modules on disk | Only sees what's present |
 | Instance data | Server-side, not in local shells | Customers isolated per-instance |
-| Audit trail | Git history on root repo | Every change is a reviewed commit under user's identity |
+| Audit trail | Git + Dolt history | Every change is versioned under user's identity |
 
-The root repo is safe for everyone to read. It contains structure, people (public info + SSH pubkeys), and roles. Actual secrets are agenix-encrypted — only decryptable by people whose roles grant access. The LLM's context, tools, and capabilities are exactly the user's context, tools, and capabilities — nothing more.
+The root repo is safe for everyone to read. It contains structure, roles, and identity (public info). Actual secrets are agenix-encrypted — only decryptable by people whose roles grant access. The LLM's context, tools, and capabilities are exactly the user's context, tools, and capabilities — nothing more.
 
 ## What's In vs What's Out
 
-### In the repo (the company's definition)
+### In the repo + Dolt (the guild's definition)
 
-| What | Format | Example |
-|------|--------|---------|
-| Identity | markdown | mission.md, voice.md, processes.md |
-| People | JSON | roster.json — who, what role, when started |
-| State | JSON | stage.json, customers.json, priorities.json |
-| Decisions | markdown + JSON index | why we chose Elm, why datalog, why nix |
-| Brand | JSON | colors, fonts, name, strapline |
-| Infrastructure | nix | shells, server configs, builds |
+| What | Format | Where |
+|------|--------|-------|
+| Identity | markdown | identity/mission.md, voice.md, processes.md |
+| People | Dolt SQL | roster, person_roles, ssh_keys tables |
+| Customers | Dolt SQL | customers table |
+| Company state | JSON | state/stage.json, priorities.json, metrics.json |
+| Decisions | markdown + JSON index | decisions/ |
+| Brand | JSON | brand/brand.json |
+| Infrastructure | nix | flake.nix, roles/, modules/, server/ |
 | Secrets (encrypted) | age files | only decryptable by role |
-| AI context | markdown | per-role fragments assembled on shell entry |
+| AI context | markdown | context/ — per-role fragments assembled on shell entry |
 
 ### Out of the repo (stays external)
 
@@ -1880,7 +1704,7 @@ The root repo is safe for everyone to read. It contains structure, people (publi
 | Real-time metrics | Changes every second | Plausible, server monitoring |
 | Passwords/tokens | Never in git, even encrypted | agenix for infra, 1Password for humans |
 
-The line: **the repo defines the shape and brain of the company. It doesn't hold customer data or move money.** State like metrics.json is a curated snapshot (updated periodically or by CI), not a live feed.
+The line: **the repo + Dolt define the shape and brain of the guild. They don't hold customer data or move money.** State like metrics.json is a curated snapshot (updated periodically or by CI), not a live feed.
 
 ## Migration Path
 
@@ -1892,15 +1716,16 @@ The line: **the repo defines the shape and brain of the company. It doesn't hold
 - Write first decision records from existing architecture
 - **Test**: hand the repo to an LLM and ask it to describe formabi. If it sounds right, the data is good.
 
-### Phase 1: Datom log + derive tooling
-- Create log/company.datoms with initial facts (seed from current people + customer knowledge)
-- Build `formabi-transact` tool (validates intent JSON, generates ULIDs, appends datoms)
-- Build `formabi-derive` tool (replays log, produces roster.json + customers.json)
-- Prove: LLM can run `formabi-transact` to add a person, derived JSON updates correctly
-- Prove: `git log -- log/company.datoms` shows clean append-only history
+### Phase 1: Dolt database + schema
+- Set up Dolt on the server
+- Create roster, person_roles, ssh_keys, customers tables
+- Seed from current people + customer knowledge
+- Prove: `dolt sql -q "SELECT * FROM roster"` shows current guild members
+- Prove: `dolt log` shows clean versioned history
+- Prove: `dolt diff` shows readable schema-aware diffs
 
 ### Phase 2: Nix shells (local only, no server changes)
-- Add flake.nix that reads derived roster.json + roles, composes devShells
+- Add flake.nix that reads exported Dolt data + roles, composes devenv shells
 - Add modules/ with pathExists detection for sibling repos
 - Prove: `nix develop .#alice` gives the right tools
 - cmdr/deploy/ stays as-is, untouched
@@ -1908,25 +1733,25 @@ The line: **the repo defines the shape and brain of the company. It doesn't hold
 ### Phase 3: AI context assembly
 - Add context/ fragments per role
 - Shell entry assembles CLAUDE.md from identity/ + state/ + context/ based on active modules
-- Prove: Claude Code on the bridge behaves differently per role
+- Prove: Claude Code behaves differently per role
 
-### Phase 4: Server users derived from roster.json
-- server/shared/users.nix reads people/roster.json (which is derived from datom log)
-- Deploy. Server users now come from the same datom log as local shells.
+### Phase 4: Server users derived from Dolt roster
+- server/shared/users.nix reads exported Dolt roster data
+- Deploy. Server users now come from the same Dolt tables as local shells.
 
 ### Phase 5: Server fully derived from root
 - Migrate cmdr/deploy/ into root repo's server/
-- customers.json (derived from datoms) feeds systemd services + nginx vhosts
-- secrets.nix derived from roster.json + roles
+- Dolt customers table feeds systemd services + nginx vhosts
+- secrets.nix derived from Dolt roster + roles
 - deploy-rs in root flake
 - cmdr becomes scripts-only (no config)
 
-### Phase 6: The company maintains itself
-- Handbook auto-generated from identity/ + people/ + brand/
-- CI validates: every person in derived roster has SSH key, every customer has valid port/domain
-- Onboard script reads derived state + roles, guides new hire
+### Phase 6: The guild maintains itself
+- Handbook auto-generated from identity/ + Dolt roster + brand/
+- CI validates: every active roster member has SSH key, every customer has valid port/domain
+- Onboard script queries Dolt + roles, guides new member
 - Health script queries all layers
-- LLM adds people/customers via `formabi-transact`, never edits JSON directly
+- LLM adds people/customers via `dolt sql`, never edits JSON directly
 
 ## Open Questions
 
@@ -1936,8 +1761,9 @@ The line: **the repo defines the shape and brain of the company. It doesn't hold
 - How to handle the transition period where cmdr/deploy/ and root/server/ coexist?
 - Should devenv (used today) coexist with pure flake devShells or be replaced?
 - Should decisions/ use a stricter schema (like ADR) or stay freeform?
-- What's the minimum viable root repo? Just identity/ + log/ + state/ without nix?
-- What language for `formabi-transact` / `formabi-derive`? Shell script + jq? Rust CLI? Nix derivation?
-- Should the datom log format match the product's datom format exactly, or be a simplified version?
-- How to handle SSH keys in the datom log? They're large — store as datoms or keep as a separate file referenced by entity ID?
-- Should `formabi-transact` be an MCP tool so Claude Code can call it directly?
+- What's the minimum viable root repo? Just identity/ + Dolt + state/ without nix?
+- How to connect Dolt to the nix build? Export JSON at build time, or read via a nix fetcher?
+- Where does the Dolt database live? On the server only, or replicated locally?
+- Should Dolt branches map to git branches for coordinated changes (e.g., hire-dave branch in both)?
+- How to handle Dolt auth? Unix permissions on the server? Dolt's built-in user system?
+- Should `dolt sql` be exposed as an MCP tool so Claude Code can query the ledger directly?
