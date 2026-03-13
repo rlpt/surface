@@ -96,20 +96,31 @@ cmd_checkout() {
   (cd "$SURFACE_DB" && dolt checkout "$@")
 }
 
-REMOTE_PATH="formrunner:/var/lib/surface/dolt/surface-db"
+DOLT_REMOTE_URL="${SURFACE_DOLT_REMOTE:-http://formrunner:50051/surface-db}"
+
+# Ensure the dolt remote 'origin' is configured
+ensure_remote() {
+  (
+    cd "$SURFACE_DB"
+    if ! dolt remote | grep -q '^origin$'; then
+      dolt remote add origin "$DOLT_REMOTE_URL"
+    fi
+  )
+}
 
 cmd_sync() {
   [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
+  ensure_remote
   local direction="${1:-push}"
   case "$direction" in
     push)
-      echo "Syncing local → formrunner"
-      rsync -av --delete "$SURFACE_DB/" "$REMOTE_PATH/"
+      echo "Pushing to origin ($DOLT_REMOTE_URL)"
+      (cd "$SURFACE_DB" && dolt push origin main)
       echo "Done"
       ;;
     pull)
-      echo "Syncing formrunner → local"
-      rsync -av --delete "$REMOTE_PATH/" "$SURFACE_DB/"
+      echo "Pulling from origin ($DOLT_REMOTE_URL)"
+      (cd "$SURFACE_DB" && dolt pull origin)
       echo "Done"
       ;;
     *)

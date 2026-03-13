@@ -8,3 +8,4 @@ Data (dolt database):
   data commit -m 'msg'      Commit current changes
   data branch [name]        List or create branches
   data checkout <branch>    Switch branches
+  data sync [push|pull]     Push/pull to formrunner via dolt remote

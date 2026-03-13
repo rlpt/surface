@@ -17,15 +17,29 @@ export BRAND_ACCENT="${BRAND_ACCENT:-#a78bfa}"
 export BRAND_BG="${BRAND_BG:-#0a0a1a}"
 export BRAND_TEXT="${BRAND_TEXT:-#e0e0e0}"
 
-# SURFACE_DOLT_SOURCE: if set, copy live data from this path
-# Otherwise fall back to seed data
+# SURFACE_DOLT_REMOTE: clone live data from the remotesapi endpoint
+# Falls back to seed data if unset or clone fails
 echo "==> Initialising database"
 if [ ! -d "$SURFACE_DB/.dolt" ]; then
-  if [ -n "${SURFACE_DOLT_SOURCE:-}" ] && [ -d "${SURFACE_DOLT_SOURCE}/.dolt" ]; then
-    echo "    Copying from $SURFACE_DOLT_SOURCE"
-    cp -a "$SURFACE_DOLT_SOURCE" "$SURFACE_DB"
+  if [ -n "${SURFACE_DOLT_REMOTE:-}" ]; then
+    echo "    Cloning from $SURFACE_DOLT_REMOTE"
+    if dolt clone "$SURFACE_DOLT_REMOTE" "$SURFACE_DB"; then
+      echo "    Cloned successfully"
+    else
+      echo "    Clone failed — falling back to seed data"
+      rm -rf "$SURFACE_DB"
+      mkdir -p "$SURFACE_DB"
+      (
+        cd "$SURFACE_DB"
+        dolt init --name "surface" --email "system@formabi.com"
+        dolt sql < "$SURFACE_ROOT/modules/data/schema.sql"
+        dolt sql < "$SURFACE_ROOT/modules/data/seed.sql"
+        dolt add .
+        dolt commit -m "init: schema and seed data"
+      )
+    fi
   else
-    echo "    No live data source — using seed data"
+    echo "    No remote configured — using seed data"
     mkdir -p "$SURFACE_DB"
     (
       cd "$SURFACE_DB"

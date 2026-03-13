@@ -6,7 +6,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build site
         env:
-          SURFACE_DOLT_SOURCE: /var/lib/surface/dolt/surface-db
+          SURFACE_DOLT_REMOTE: http://localhost:50051/surface-db
         run: |
           /run/current-system/sw/bin/nix develop --option sandbox false --command bash scripts/build-site.sh /tmp/surface-site
       - name: Deploy

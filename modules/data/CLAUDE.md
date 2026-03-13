@@ -52,7 +52,7 @@ data checkout main           # switch back
 
 ## Remotes
 
-The production data lives on formrunner at `/var/lib/surface/dolt/surface-db`. Dolt doesn't support SSH remotes, so we sync via rsync:
+The production data lives on formrunner, served via Dolt's remotesapi at `http://formrunner:50051/surface-db`. The `data` command auto-configures the `origin` remote on first sync.
 
 ```bash
 # Push local data to formrunner (after committing)
@@ -62,7 +62,7 @@ data sync
 data sync pull
 ```
 
-CI clones from `file:///var/lib/surface/dolt/surface-db` (same machine) when building the site. If `SURFACE_DOLT_REMOTE` is unset, it falls back to seed data.
+Override the remote URL with `SURFACE_DOLT_REMOTE`. CI clones from `http://localhost:50051/surface-db` (same machine). Falls back to seed data if the remote is unavailable.
 
 ## Reset
 
