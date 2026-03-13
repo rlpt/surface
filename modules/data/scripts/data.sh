@@ -96,6 +96,41 @@ cmd_checkout() {
   (cd "$SURFACE_DB" && dolt checkout "$@")
 }
 
+cmd_remote() {
+  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
+  if [ $# -eq 0 ]; then
+    (cd "$SURFACE_DB" && dolt remote -v)
+  else
+    (cd "$SURFACE_DB" && dolt remote "$@")
+  fi
+}
+
+cmd_push() {
+  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
+  local remote="${1:-origin}"
+  (cd "$SURFACE_DB" && dolt push "$remote" main)
+  echo "Pushed to $remote"
+}
+
+cmd_pull() {
+  [ -d "$SURFACE_DB/.dolt" ] || die "database not initialised — run 'data init'"
+  local remote="${1:-origin}"
+  (cd "$SURFACE_DB" && dolt pull "$remote")
+  echo "Pulled from $remote"
+}
+
+cmd_clone() {
+  local remote_url="$1"
+  if [ -d "$SURFACE_DB/.dolt" ]; then
+    echo "Database already exists at $SURFACE_DB"
+    echo "Use 'data reset' to recreate, or 'data pull' to update."
+    return
+  fi
+  mkdir -p "$(dirname "$SURFACE_DB")"
+  dolt clone "$remote_url" "$SURFACE_DB"
+  echo "Cloned $remote_url to $SURFACE_DB"
+}
+
 cmd_help() {
   echo "data — surface database (dolt)"
   echo ""
@@ -111,6 +146,10 @@ cmd_help() {
   echo "  commit -m 'msg'    Commit current changes"
   echo "  branch [name]      List or create branches"
   echo "  checkout <branch>  Switch branches"
+  echo "  remote [args]      List or manage remotes"
+  echo "  push [remote]      Push to remote (default: origin)"
+  echo "  pull [remote]      Pull from remote (default: origin)"
+  echo "  clone <url>        Clone database from remote"
   echo "  help               Show this help"
 }
 
@@ -124,5 +163,9 @@ case "${1:-help}" in
   commit)   shift; cmd_commit "$@" ;;
   branch)   shift; cmd_branch "$@" ;;
   checkout) shift; cmd_checkout "$@" ;;
+  remote)   shift; cmd_remote "$@" ;;
+  push)     shift; cmd_push "$@" ;;
+  pull)     shift; cmd_pull "$@" ;;
+  clone)    shift; cmd_clone "$@" ;;
   help|*)   cmd_help ;;
 esac

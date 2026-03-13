@@ -50,6 +50,28 @@ data checkout main           # switch back
 2. Run the relevant check command (`accounts check`, `shares check`)
 3. Commit with `data commit -m "description"`
 
+## Remotes
+
+Dolt supports remotes like git. The production data lives on formrunner at `/var/lib/surface/dolt/surface-db`. Push data changes so CI builds use live data:
+
+```bash
+# Add the remote (one-time, via SSH over Tailscale)
+data remote add origin file:///var/lib/surface/dolt/surface-db
+# Or over SSH:
+data remote add origin ssh://formrunner/var/lib/surface/dolt/surface-db
+
+# Push after committing data changes
+data push                    # pushes main to origin
+
+# Pull latest from remote
+data pull
+
+# Clone from remote (instead of init from seed)
+data clone ssh://formrunner/var/lib/surface/dolt/surface-db
+```
+
+CI uses `SURFACE_DOLT_REMOTE` to clone live data when building the site. If unset, it falls back to seed data.
+
 ## Reset
 
 If the database gets corrupted or you want to start fresh:

@@ -1,0 +1,15 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: nix
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build site
+        env:
+          SURFACE_DOLT_REMOTE: file:///var/lib/surface/dolt/surface-db
+        run: |
+          /run/current-system/sw/bin/nix develop --option sandbox false --command bash scripts/build-site.sh /tmp/surface-site
+      - name: Deploy
+        if: github.ref == 'refs/heads/main'
+        run: |
+          /run/wrappers/bin/sudo /run/current-system/sw/bin/deploy-surface /tmp/surface-site

@@ -3,3 +3,4 @@ downloads/*
 .surface-db/
 out/
 __pycache__/
+site/

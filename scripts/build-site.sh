@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Build all HTML and PDF output from seed data into a single site directory.
+# Usage: build-site.sh [output-dir]
+#   output-dir defaults to ./site
+
+set -euo pipefail
+
+SURFACE_ROOT="${SURFACE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+SITE_DIR="${1:-$SURFACE_ROOT/site}"
+
+export SURFACE_ROOT
+export SURFACE_DB="$SURFACE_ROOT/.surface-db"
+
+# Brand defaults (modules/brand sets these in the shell, replicate here)
+export BRAND_PRIMARY="${BRAND_PRIMARY:-#6366f1}"
+export BRAND_ACCENT="${BRAND_ACCENT:-#a78bfa}"
+export BRAND_BG="${BRAND_BG:-#0a0a1a}"
+export BRAND_TEXT="${BRAND_TEXT:-#e0e0e0}"
+
+# SURFACE_DOLT_REMOTE: if set, clone live data from dolt remote
+# Otherwise fall back to seed data
+echo "==> Initialising database"
+if [ ! -d "$SURFACE_DB/.dolt" ]; then
+  if [ -n "${SURFACE_DOLT_REMOTE:-}" ]; then
+    echo "    Cloning from $SURFACE_DOLT_REMOTE"
+    mkdir -p "$(dirname "$SURFACE_DB")"
+    dolt clone "$SURFACE_DOLT_REMOTE" "$SURFACE_DB"
+  else
+    echo "    No SURFACE_DOLT_REMOTE set — using seed data"
+    mkdir -p "$SURFACE_DB"
+    (
+      cd "$SURFACE_DB"
+      dolt init --name "surface" --email "system@formabi.com"
+      dolt sql < "$SURFACE_ROOT/modules/data/schema.sql"
+      dolt sql < "$SURFACE_ROOT/modules/data/seed.sql"
+      dolt add .
+      dolt commit -m "init: schema and seed data"
+    )
+  fi
+fi
+
+echo "==> Building dashboard HTML"
+python3 "$SURFACE_ROOT/modules/dashboard/scripts/dashboard.py" build "$SITE_DIR/dashboard"
+
+echo "==> Building board HTML"
+python3 "$SURFACE_ROOT/modules/board/scripts/board.py" html "$SITE_DIR/board"
+
+echo "==> Generating PDFs"
+mkdir -p "$SURFACE_ROOT/downloads"
+
+# Board PDFs
+python3 "$SURFACE_ROOT/modules/board/scripts/board.py" pdf pack || echo "    (no board data for PDF)"
+
+# Contract PDFs — generate for all contracts
+CONTRACTS=$(cd "$SURFACE_DB" && dolt sql -r csv -q "SELECT id FROM contracts;" 2>/dev/null | tail -n +2) || true
+for ct in $CONTRACTS; do
+  python3 "$SURFACE_ROOT/modules/crm/scripts/crm.py" pdf "$ct" || echo "    (skipped $ct)"
+done
+
+# Shares PDFs
+python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" pdf table || echo "    (no shares data for PDF)"
+
+# Copy generated PDFs to site
+mkdir -p "$SITE_DIR/downloads"
+cp -v "$SURFACE_ROOT/downloads/"*.pdf "$SITE_DIR/downloads/" 2>/dev/null || echo "    (no PDFs generated)"
+
+# Generate a top-level index page linking to everything
+cat > "$SITE_DIR/index.html" << 'INDEXEOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surface</title>
+<style>
+  :root { --bg: #0a0a1a; --text: #e0e0e0; --primary: #6366f1; --accent: #a78bfa; }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text);
+         max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { color: var(--accent); }
+  h1 { border-bottom: 2px solid var(--primary); padding-bottom: 0.5rem; }
+  ul { list-style: none; padding: 0; }
+  li { padding: 0.5rem 0; }
+  li::before { content: "→ "; color: var(--accent); }
+  .section { margin-top: 2rem; }
+</style>
+</head>
+<body>
+<h1>Surface</h1>
+<p>Company-as-code output</p>
+<div class="section">
+  <h2>Dashboard</h2>
+  <ul>
+    <li><a href="dashboard/">Overview</a></li>
+  </ul>
+</div>
+<div class="section">
+  <h2>Board</h2>
+  <ul>
+    <li><a href="board/">Board pack</a></li>
+  </ul>
+</div>
+<div class="section">
+  <h2>Downloads</h2>
+  <ul id="downloads"></ul>
+</div>
+<script>
+// List PDF files if served dynamically; static fallback
+document.getElementById('downloads').innerHTML = '<li><a href="downloads/">View all PDFs</a></li>';
+</script>
+</body>
+</html>
+INDEXEOF
+
+echo "==> Site built at $SITE_DIR"
+ls -la "$SITE_DIR"
