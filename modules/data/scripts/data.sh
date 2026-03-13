@@ -23,9 +23,29 @@ cmd_check() {
   local errors=0
   python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" check || errors=$((errors + 1))
   python3 "$SURFACE_ROOT/modules/accounts/scripts/accounts.py" check || errors=$((errors + 1))
+  echo ""
+  echo "Running referential integrity checks..."
+  python3 -c "
+import sys, os
+sys.path.insert(0, os.path.join('$SURFACE_ROOT', 'modules', 'data', 'scripts'))
+import datalib
+all_errors = []
+for domain in ['shares', 'accounts', 'crm', 'board']:
+    data = datalib.load(domain)
+    errs = datalib.validate_refs(domain, data)
+    for e in errs:
+        all_errors.append(f'  {domain}: {e}')
+if all_errors:
+    print('referential integrity errors:')
+    for e in all_errors:
+        print(e)
+    sys.exit(1)
+else:
+    print('OK — all references valid')
+" || errors=$((errors + 1))
   if [ "$errors" -gt 0 ]; then
     echo ""
-    echo "$errors module(s) reported errors"
+    echo "$errors check(s) reported errors"
     exit 1
   fi
   echo ""

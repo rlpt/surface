@@ -275,6 +275,53 @@ def renewals_due(crm_data=None):
 
 
 # ---------------------------------------------------------------------------
+# Referential integrity
+# ---------------------------------------------------------------------------
+
+def validate_refs(domain, data):
+    """Check referential integrity for a domain. Returns list of error strings."""
+    errors = []
+
+    def _check(items, field, valid_set, label):
+        for item in items:
+            val = item.get(field)
+            if val is not None and val not in valid_set:
+                errors.append(f"{label}: {field} '{val}' not found")
+
+    if domain == "shares":
+        holder_ids = {h["id"] for h in data.get("holders", [])}
+        class_names = {c["name"] for c in data.get("share_classes", [])}
+        pool_names = {p["name"] for p in data.get("pools", [])}
+        _check(data.get("share_events", []), "holder_id", holder_ids, "share_events")
+        _check(data.get("share_events", []), "share_class", class_names, "share_events")
+        _check(data.get("pools", []), "share_class", class_names, "pools")
+        _check(data.get("pool_members", []), "holder_id", holder_ids, "pool_members")
+        _check(data.get("pool_members", []), "pool_name", pool_names, "pool_members")
+
+    elif domain == "accounts":
+        account_paths = {a["path"] for a in data.get("accounts", [])}
+        txn_ids = {t["id"] for t in data.get("transactions", [])}
+        _check(data.get("postings", []), "account_path", account_paths, "postings")
+        _check(data.get("postings", []), "txn_id", txn_ids, "postings")
+
+    elif domain == "crm":
+        customer_ids = {c["id"] for c in data.get("customers", [])}
+        contract_ids = {c["id"] for c in data.get("contracts", [])}
+        _check(data.get("contacts", []), "customer_id", customer_ids, "contacts")
+        _check(data.get("contracts", []), "customer_id", customer_ids, "contracts")
+        _check(data.get("contract_lines", []), "contract_id", contract_ids, "contract_lines")
+        _check(data.get("contract_clauses", []), "contract_id", contract_ids, "contract_clauses")
+
+    elif domain == "board":
+        meeting_ids = {m["id"] for m in data.get("board_meetings", [])}
+        _check(data.get("board_attendees", []), "meeting_id", meeting_ids, "board_attendees")
+        _check(data.get("board_minutes", []), "meeting_id", meeting_ids, "board_minutes")
+        _check(data.get("board_resolutions", []), "meeting_id", meeting_ids, "board_resolutions")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Table formatting (for CLI output)
 # ---------------------------------------------------------------------------
 
