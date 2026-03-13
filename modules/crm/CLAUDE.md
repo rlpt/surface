@@ -1,94 +1,85 @@
 # CRM Module — LLM Context
 
-Lightweight CRM stored in Dolt alongside the ledger and cap table. Tracks customers (organisations), contacts (people), interactions, deals, and tags.
+Customer contract management stored in Dolt. Define commercial relationships as structured data, output legal documents as PDF.
 
 ## Tables
 
-- `customers` — customer organisations (id, company, pricing_plan, status, contract_start, contract_end, mrr_gbp, instance_id, notes, created_at)
-- `contacts` — people we're talking to (id, customer_id, company, name, email, role, contact_role, source, stage, notes, created_at, last_contacted, next_action_date, next_action)
-- `interactions` — logged touchpoints (contact_id, interaction_date, channel, direction, summary, follow_up)
-- `deals` — revenue opportunities (id, contact_id, title, stage, value_gbp, recurring, opened_date, closed_date, lost_reason, notes)
-- `tags` — freeform labels on contacts (contact_id, tag)
+- `customers` — counterparties (id, company, company_number, address, notes, created_at)
+- `contacts` — people at customers (id, customer_id, name, email, role, notes, created_at)
+- `contracts` — master contract records (id, customer_id, title, status, effective_date, term_months, auto_renew, payment_terms, currency, governing_law, jurisdiction, notice_period_days, notes, created_at)
+- `contract_lines` — commercial line items (contract_id, seq, description, quantity, unit_price, frequency)
+- `contract_clauses` — legal terms (contract_id, seq, heading, body)
 
 ## Views
 
-- `pipeline` — open deals grouped by stage with totals
-- `stale_contacts` — leads/prospects not contacted in 14+ days
-- `customer_overview` — customer orgs with contact count and won deal value
-- `renewals_due` — customers with contracts ending within 90 days
+- `contract_summary` — contracts with MRR calculation, line/clause counts
+- `renewals_due` — active contracts expiring within 90 days
 
-## Stages
+## Statuses
 
-Contact stages: `lead` → `prospect` → `customer` | `churned` | `dormant`
+Contract: `draft` → `active` → `expired` | `terminated`
 
-Contact roles (within a customer): `champion`, `admin`, `billing`, `user`, `executive`
+Line frequency: `monthly`, `quarterly`, `annual`, `one-off`
 
-Customer statuses: `onboarding` → `active` | `churning` → `churned`
-
-Deal stages: `qualifying` → `proposal` → `negotiation` → `closed-won` | `closed-lost`
-
-## Workflow: add a new lead
+## Workflow: onboard a new customer and create a contract
 
 ```bash
-data sql "INSERT INTO contacts (id, company, name, email, role, source, stage)
-  VALUES ('acme-jane', 'Acme Corp', 'Jane Smith', 'jane@acme.com', 'Head of Ops', 'inbound', 'lead');"
-data sql "INSERT INTO tags (contact_id, tag) VALUES ('acme-jane', 'fintech'), ('acme-jane', 'uk');"
-data commit -m "add lead: Jane Smith at Acme Corp (inbound)"
-```
+# 1. Add the customer
+crm add acme "Acme Corp" 12345678
 
-## Workflow: log interaction and advance stage
+# 2. Add a contact
+crm contact acme "Jane Smith" "jane@acme.com" "Head of Ops"
 
-```bash
-crm log acme-jane "Intro call. They have 50+ forms across 3 depts."
-# or manually:
-data sql "INSERT INTO interactions (contact_id, interaction_date, channel, direction, summary)
-  VALUES ('acme-jane', '2026-03-10', 'call', 'outbound', 'Intro call...');"
-data sql "UPDATE contacts SET last_contacted = '2026-03-10', stage = 'prospect' WHERE id = 'acme-jane';"
-data commit -m "call with Jane@Acme — moved to prospect"
-```
+# 3. Create a draft contract
+crm new acme "SaaS Subscription Agreement"
 
-## Workflow: close deal and create customer
+# 4. Set commercial terms
+crm set ct-acme-1 effective-date 2026-04-01
+crm set ct-acme-1 term 12
+crm set ct-acme-1 auto-renew true
+crm set ct-acme-1 payment-terms net-30
 
-When a deal closes, create the customer org and link contacts:
+# 5. Add service lines
+crm line ct-acme-1 1 "Platform licence — Standard plan" 200 monthly
+crm line ct-acme-1 2 "Onboarding & training" 1500 one-off
 
-```bash
-# 1. Create customer organisation
-data sql "INSERT INTO customers (id, company, pricing_plan, status, contract_start, contract_end, mrr_gbp)
-  VALUES ('acme', 'Acme Corp', 'standard', 'onboarding', '2026-04-01', '2027-04-01', 200.00);"
+# 6. Add standard legal clauses
+crm standard-clauses ct-acme-1
 
-# 2. Link contacts to customer and set stage
-data sql "UPDATE contacts SET customer_id = 'acme', stage = 'customer' WHERE id = 'acme-jane';"
+# 7. Generate contract PDF
+crm pdf ct-acme-1
 
-# 3. Close the deal
-data sql "UPDATE deals SET stage = 'closed-won', closed_date = '2026-04-01' WHERE id = 'acme-2026';"
-
-data commit -m "closed-won: Acme Corp — customer created"
-```
-
-## Workflow: add more contacts to existing customer
-
-```bash
-data sql "INSERT INTO contacts (id, customer_id, company, name, email, role, contact_role, stage)
-  VALUES ('acme-bob', 'acme', 'Acme Corp', 'Bob Chen', 'bob@acme.com', 'IT Admin', 'admin', 'customer');"
-data commit -m "add contact: Bob Chen at Acme (admin)"
+# 8. Once signed, activate
+crm activate ct-acme-1
 ```
 
 ## Commands
 
 Read:
-- `crm pipeline` — pipeline overview (stages, counts, values)
-- `crm contacts [active]` — list all or active contacts
-- `crm customers [active|all]` — list customer organisations
-- `crm customer <customer-id>` — customer detail (contacts, deals, activity)
-- `crm renewals` — renewals due in next 90 days
-- `crm stale` — contacts not contacted in 14+ days
-- `crm find <term>` — search by company/name/tag
-- `crm history <contact-id>` — interaction history
-- `crm deals [won|lost]` — list deals
+- `crm customers` — list all customers
+- `crm customer <customer-id>` — customer detail (contacts, contracts)
+- `crm contracts [active|draft]` — list contracts
+- `crm contract <contract-id>` — contract detail (terms, lines, clauses)
+- `crm renewals` — contracts expiring within 90 days
+- `crm find <term>` — search customers by name
 
 Write:
-- `crm log <contact-id> "summary"` — guided interaction logging
+- `crm add <id> "Company" [company-number]` — add a customer
+- `crm contact <customer-id> "Name" "email" [role]` — add a contact
+- `crm new <customer-id> "Contract Title"` — create a draft contract
+- `crm line <contract-id> <seq> "desc" <price> [frequency]` — add a line item
+- `crm clause <contract-id> <seq> "heading" "body"` — add a custom clause
+- `crm standard-clauses <contract-id>` — add standard legal clauses (12 clauses)
+- `crm set <contract-id> <field> <value>` — set contract field
+- `crm activate <contract-id>` — mark contract as active
 
-Reports:
-- `crm digest` — weekly digest (pipeline, stale, customers, actions, activity)
-- `crm forecast` — weighted revenue forecast
+Output:
+- `crm pdf <contract-id>` — generate contract PDF (→ downloads/)
+
+## Standard Clauses
+
+`crm standard-clauses` adds 12 boilerplate clauses: Definitions, Services, Fees and Payment, Term and Renewal, Termination, Intellectual Property, Confidentiality, Data Protection, Limitation of Liability, Force Majeure, General, Governing Law and Jurisdiction. These can be customised per contract by updating the clause body via `data sql`.
+
+## Set Fields
+
+Allowed fields for `crm set`: effective-date, term, auto-renew, payment-terms, currency, governing-law, jurisdiction, notice-period, status, notes.

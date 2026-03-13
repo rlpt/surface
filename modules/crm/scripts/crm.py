@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""CRM — contacts, deals, pipeline (dolt)"""
+"""CRM — customer contract management (dolt)"""
 
+import csv
+import io
 import os
 import subprocess
 import sys
@@ -8,6 +10,7 @@ from datetime import date
 
 SURFACE_ROOT = os.environ.get("SURFACE_ROOT", ".")
 SURFACE_DB = os.environ.get("SURFACE_DB", os.path.join(SURFACE_ROOT, ".surface-db"))
+DOWNLOADS_DIR = os.path.join(SURFACE_ROOT, "downloads")
 
 
 def die(msg):
@@ -40,339 +43,223 @@ def dsql_csv(query):
 
 
 def dsql_val(query):
-    """Return a single scalar value from a query."""
     rows = dsql_csv(query)
     return rows[0] if rows else ""
 
 
+def dsql_rows(query):
+    check_db()
+    r = subprocess.run(
+        ["dolt", "sql", "-r", "csv", "-q", query],
+        cwd=SURFACE_DB,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    reader = csv.DictReader(io.StringIO(r.stdout))
+    return list(reader)
+
+
 def dolt_commit(msg):
     subprocess.run(["dolt", "add", "."], cwd=SURFACE_DB, check=True)
-    subprocess.run(["dolt", "commit", "-m", msg], cwd=SURFACE_DB, check=True)
-
-
-# --- Read commands ---
-
-
-def cmd_pipeline():
-    count = dsql_val(
-        "SELECT COUNT(*) FROM deals WHERE stage NOT IN ('closed-won', 'closed-lost');"
+    subprocess.run(
+        ["dolt", "commit", "--allow-empty", "-m", msg],
+        cwd=SURFACE_DB, check=True,
     )
-    if count == "0":
-        print("No open deals in pipeline.")
-        return
-
-    dsql("SELECT * FROM pipeline;")
-    total = dsql_val(
-        "SELECT COALESCE(SUM(value_gbp), 0) FROM deals "
-        "WHERE stage NOT IN ('closed-won', 'closed-lost');"
-    )
-    print(f"\nTotal pipeline value: £{total}")
 
 
-def cmd_contacts(filter_=""):
-    if filter_ == "active":
-        dsql(
-            "SELECT id, company, name, stage, "
-            "next_action_date AS next_date, next_action "
-            "FROM contacts "
-            "WHERE stage IN ('lead', 'prospect') "
-            "ORDER BY next_action_date ASC, company;"
-        )
-    else:
-        dsql(
-            "SELECT id, company, name, stage, "
-            "last_contacted, next_action_date AS next_date "
-            "FROM contacts ORDER BY company, name;"
-        )
+def esc(s):
+    return s.replace("'", "''")
 
 
-def cmd_stale():
-    dsql("SELECT * FROM stale_contacts;")
+# ── Standard clauses ────────────────────────────────────────────────────────
+
+STANDARD_CLAUSES = [
+    (
+        "Definitions",
+        'In this Agreement: "Provider" means the party providing the Services; '
+        '"Customer" means the party receiving the Services; "Services" means the '
+        'services described in the Commercial Terms; "Effective Date" means the '
+        'date on which this Agreement comes into force; "Term" means the period '
+        "specified in the Commercial Terms.",
+    ),
+    (
+        "Services",
+        "The Provider shall supply the Services to the Customer in accordance "
+        "with the Commercial Terms and any applicable service levels. The Provider "
+        "shall perform the Services with reasonable skill and care.",
+    ),
+    (
+        "Fees and Payment",
+        "The Customer shall pay the fees set out in the Commercial Terms. "
+        "Invoices are due within the payment terms specified. Late payments shall "
+        "bear interest at 3% per annum above the Bank of England base rate. "
+        "All amounts are exclusive of VAT unless stated otherwise.",
+    ),
+    (
+        "Term and Renewal",
+        "This Agreement commences on the Effective Date and continues for the "
+        "Term specified in the Commercial Terms. If auto-renewal is specified, "
+        "the Agreement shall automatically renew for successive periods equal to "
+        "the original Term unless either party gives written notice of "
+        "non-renewal at least the number of days specified as the notice period "
+        "before the end of the then-current Term.",
+    ),
+    (
+        "Termination",
+        "Either party may terminate this Agreement: (a) by giving written notice "
+        "as specified in the notice period if the other party commits a material "
+        "breach and fails to remedy it within 30 days of written notice; (b) "
+        "immediately if the other party becomes insolvent, enters administration, "
+        "or ceases to carry on business.",
+    ),
+    (
+        "Intellectual Property",
+        "All intellectual property rights in the Services and any deliverables "
+        "shall remain vested in the Provider. The Customer is granted a "
+        "non-exclusive, non-transferable licence to use the Services for its "
+        "internal business purposes during the Term.",
+    ),
+    (
+        "Confidentiality",
+        "Each party shall keep confidential all information of a confidential "
+        "nature obtained from the other party and shall not disclose it to any "
+        "third party without prior written consent, except as required by law or "
+        "to professional advisers. This obligation survives termination for a "
+        "period of 3 years.",
+    ),
+    (
+        "Data Protection",
+        "Each party shall comply with its obligations under applicable data "
+        "protection legislation including the UK GDPR and the Data Protection "
+        "Act 2018. Where the Provider processes personal data on behalf of the "
+        "Customer, the parties shall enter into a separate data processing "
+        "agreement.",
+    ),
+    (
+        "Limitation of Liability",
+        "Neither party excludes or limits liability for death or personal injury "
+        "caused by negligence, fraud, or any other liability that cannot be "
+        "excluded by law. Subject to the foregoing, each party's total aggregate "
+        "liability under this Agreement shall not exceed the total fees paid or "
+        "payable in the 12-month period preceding the claim. Neither party shall "
+        "be liable for indirect, consequential, or special losses.",
+    ),
+    (
+        "Force Majeure",
+        "Neither party shall be liable for any failure or delay in performing "
+        "its obligations where such failure or delay results from circumstances "
+        "beyond its reasonable control. If such circumstances continue for more "
+        "than 90 days, either party may terminate this Agreement by written notice.",
+    ),
+    (
+        "General",
+        "This Agreement constitutes the entire agreement between the parties. "
+        "No variation shall be effective unless in writing and signed by both "
+        "parties. A waiver of any right under this Agreement is only effective "
+        "if it is in writing. This Agreement may not be assigned without the "
+        "prior written consent of the other party. Nothing in this Agreement "
+        "creates a partnership or agency relationship between the parties.",
+    ),
+    (
+        "Governing Law and Jurisdiction",
+        "This Agreement and any dispute arising out of or in connection with it "
+        "shall be governed by and construed in accordance with the law specified "
+        "in the Commercial Terms. The parties submit to the exclusive jurisdiction "
+        "of the courts specified in the Commercial Terms.",
+    ),
+]
 
 
-def cmd_find(term):
-    if not term:
-        die("usage: crm find <term>")
-    esc = term.replace("'", "''")
+# ── Read commands ───────────────────────────────────────────────────────────
+
+
+def cmd_customers():
     dsql(
-        "SELECT DISTINCT c.id, c.company, c.name, c.stage, c.last_contacted "
-        "FROM contacts c "
-        "LEFT JOIN tags t ON t.contact_id = c.id "
-        f"WHERE c.company LIKE '%{esc}%' "
-        f"OR c.name LIKE '%{esc}%' "
-        f"OR t.tag LIKE '%{esc}%' "
-        "ORDER BY c.company;"
+        "SELECT id, company, company_number, "
+        "(SELECT COUNT(*) FROM contracts ct WHERE ct.customer_id = cu.id) AS contracts, "
+        "(SELECT COUNT(*) FROM contacts co WHERE co.customer_id = cu.id) AS contacts "
+        "FROM customers cu ORDER BY company;"
     )
-
-
-def cmd_history(contact):
-    if not contact:
-        die("usage: crm history <contact-id>")
-    cname = dsql_val(f"SELECT name FROM contacts WHERE id = '{contact}';")
-    if not cname:
-        die(f"unknown contact: {contact}")
-    print(f"Contact: {cname}\n")
-    dsql(
-        "SELECT interaction_date AS date, channel, direction, summary, follow_up "
-        f"FROM interactions WHERE contact_id = '{contact}' "
-        "ORDER BY interaction_date DESC, id DESC;"
-    )
-
-
-def cmd_log(contact, summary):
-    if not contact or not summary:
-        die('usage: crm log <contact-id> "summary"')
-
-    cname = dsql_val(f"SELECT name FROM contacts WHERE id = '{contact}';")
-    if not cname:
-        die(f"unknown contact: {contact}")
-
-    channels = {
-        "1": "email",
-        "2": "call",
-        "3": "meeting",
-        "4": "demo",
-        "5": "slack",
-        "6": "event",
-        "7": "other",
-    }
-    print("Channel:")
-    print("  1) email    2) call     3) meeting")
-    print("  4) demo     5) slack    6) event    7) other")
-    ch = input("Select [1-7]: ").strip()
-    channel = channels.get(ch)
-    if not channel:
-        die("invalid channel")
-
-    direction = input("Direction (inbound/outbound) [outbound]: ").strip() or "outbound"
-    if direction not in ("inbound", "outbound"):
-        die("direction must be inbound or outbound")
-
-    follow_up = input("Follow-up (optional): ").strip()
-
-    today = date.today().isoformat()
-    esc_summary = summary.replace("'", "''")
-    esc_follow = follow_up.replace("'", "''")
-
-    dsql(
-        "INSERT INTO interactions "
-        "(contact_id, interaction_date, channel, direction, summary, follow_up) "
-        f"VALUES ('{contact}', '{today}', '{channel}', '{direction}', "
-        f"'{esc_summary}', '{esc_follow}');"
-    )
-    dsql(f"UPDATE contacts SET last_contacted = '{today}' WHERE id = '{contact}';")
-
-    if follow_up:
-        next_date = input("Next action date (YYYY-MM-DD, or enter to skip): ").strip()
-        if next_date:
-            dsql(
-                f"UPDATE contacts SET next_action = '{esc_follow}', "
-                f"next_action_date = '{next_date}' WHERE id = '{contact}';"
-            )
-
-    dolt_commit(f"log {channel} with {cname} ({contact})")
-    print(f"\nLogged {channel} with {cname}")
-
-
-def cmd_deals(filter_=""):
-    if filter_ == "won":
-        dsql(
-            "SELECT d.id, c.company, d.title, d.value_gbp AS value, "
-            "d.recurring, d.closed_date "
-            "FROM deals d JOIN contacts c ON c.id = d.contact_id "
-            "WHERE d.stage = 'closed-won' ORDER BY d.closed_date DESC;"
-        )
-    elif filter_ == "lost":
-        dsql(
-            "SELECT d.id, c.company, d.title, d.value_gbp AS value, "
-            "d.closed_date, d.lost_reason "
-            "FROM deals d JOIN contacts c ON c.id = d.contact_id "
-            "WHERE d.stage = 'closed-lost' ORDER BY d.closed_date DESC;"
-        )
-    else:
-        dsql(
-            "SELECT d.id, c.company, d.title, d.stage, "
-            "d.value_gbp AS value, d.recurring, d.opened_date "
-            "FROM deals d JOIN contacts c ON c.id = d.contact_id "
-            "WHERE d.stage NOT IN ('closed-won', 'closed-lost') "
-            "ORDER BY FIELD(d.stage, 'qualifying', 'proposal', 'negotiation'), "
-            "d.value_gbp DESC;"
-        )
-
-
-def cmd_digest():
-    today = date.today().isoformat()
-    print(f"# CRM Digest — {today}\n")
-
-    print("## Pipeline")
-    open_count = dsql_val(
-        "SELECT COUNT(*) FROM deals WHERE stage NOT IN ('closed-won', 'closed-lost');"
-    )
-    if open_count == "0":
-        print("No open deals.")
-    else:
-        dsql("SELECT * FROM pipeline;")
-        total = dsql_val(
-            "SELECT COALESCE(SUM(value_gbp), 0) FROM deals "
-            "WHERE stage NOT IN ('closed-won', 'closed-lost');"
-        )
-        print(f"Total pipeline: £{total}")
-    print()
-
-    print("## Stale Contacts (14+ days)")
-    stale_count = dsql_val("SELECT COUNT(*) FROM stale_contacts;")
-    if stale_count == "0":
-        print("None — all contacts are fresh.")
-    else:
-        dsql("SELECT * FROM stale_contacts;")
-    print()
-
-    print("## Next Actions")
-    actions_count = dsql_val(
-        "SELECT COUNT(*) FROM contacts "
-        "WHERE next_action IS NOT NULL AND next_action_date IS NOT NULL "
-        "AND stage IN ('lead', 'prospect');"
-    )
-    if actions_count == "0":
-        print("No upcoming actions.")
-    else:
-        dsql(
-            "SELECT id, company, next_action_date AS date, next_action "
-            "FROM contacts "
-            "WHERE next_action IS NOT NULL AND next_action_date IS NOT NULL "
-            "AND stage IN ('lead', 'prospect') "
-            "ORDER BY next_action_date ASC;"
-        )
-    print()
-
-    print("## Customers")
-    cust_count = dsql_val(
-        "SELECT COUNT(*) FROM customers WHERE status IN ('active', 'onboarding');"
-    )
-    mrr = dsql_val(
-        "SELECT COALESCE(SUM(mrr_gbp), 0) FROM customers "
-        "WHERE status IN ('active', 'onboarding');"
-    )
-    print(f"Active customers: {cust_count} — MRR: £{mrr}")
-    renewal_count = dsql_val("SELECT COUNT(*) FROM renewals_due;")
-    if renewal_count != "0":
-        dsql("SELECT * FROM renewals_due;")
-    print()
-
-    print("## Recent Activity (7 days)")
-    recent_count = dsql_val(
-        "SELECT COUNT(*) FROM interactions "
-        "WHERE interaction_date >= DATE_SUB(CURRENT_DATE, INTERVAL 7 DAY);"
-    )
-    if recent_count == "0":
-        print("No interactions in the last 7 days.")
-    else:
-        dsql(
-            "SELECT i.interaction_date AS date, c.company, i.channel, i.summary "
-            "FROM interactions i "
-            "JOIN contacts c ON c.id = i.contact_id "
-            "WHERE i.interaction_date >= DATE_SUB(CURRENT_DATE, INTERVAL 7 DAY) "
-            "ORDER BY i.interaction_date DESC;"
-        )
-
-
-def cmd_forecast():
-    print("# Revenue Forecast\n")
-    open_count = dsql_val(
-        "SELECT COUNT(*) FROM deals WHERE stage NOT IN ('closed-won', 'closed-lost');"
-    )
-    if open_count == "0":
-        print("No open deals to forecast.")
-        return
-
-    dsql(
-        "SELECT d.stage, COUNT(*) AS deals, SUM(d.value_gbp) AS total, "
-        "CASE d.stage "
-        "WHEN 'qualifying' THEN ROUND(SUM(d.value_gbp) * 0.2, 2) "
-        "WHEN 'proposal' THEN ROUND(SUM(d.value_gbp) * 0.5, 2) "
-        "WHEN 'negotiation' THEN ROUND(SUM(d.value_gbp) * 0.8, 2) "
-        "END AS weighted "
-        "FROM deals d "
-        "WHERE d.stage NOT IN ('closed-won', 'closed-lost') "
-        "GROUP BY d.stage "
-        "ORDER BY FIELD(d.stage, 'qualifying', 'proposal', 'negotiation');"
-    )
-
-    weighted = dsql_val(
-        "SELECT ROUND(SUM(CASE stage "
-        "WHEN 'qualifying' THEN value_gbp * 0.2 "
-        "WHEN 'proposal' THEN value_gbp * 0.5 "
-        "WHEN 'negotiation' THEN value_gbp * 0.8 END), 2) "
-        "FROM deals WHERE stage NOT IN ('closed-won', 'closed-lost');"
-    )
-    print(f"\nWeighted forecast: £{weighted}")
-
-    won = dsql_val(
-        "SELECT COALESCE(SUM(value_gbp), 0) FROM deals WHERE stage = 'closed-won';"
-    )
-    print(f"\nClosed-won to date: £{won}")
-
-
-def cmd_customers(filter_=""):
-    if filter_ == "active":
-        dsql(
-            "SELECT id, company, pricing_plan, mrr, contract_end, contacts "
-            "FROM customer_overview WHERE status = 'active' "
-            "ORDER BY mrr DESC;"
-        )
-    elif filter_ == "all":
-        dsql("SELECT * FROM customer_overview ORDER BY status, company;")
-    else:
-        dsql(
-            "SELECT id, company, pricing_plan, status, mrr, contract_end, contacts "
-            "FROM customer_overview ORDER BY status, company;"
-        )
-
-    total = dsql_val(
-        "SELECT COALESCE(SUM(mrr_gbp), 0) FROM customers "
-        "WHERE status IN ('active', 'onboarding');"
-    )
-    count = dsql_val(
-        "SELECT COUNT(*) FROM customers WHERE status IN ('active', 'onboarding');"
-    )
-    print(f"\n{count} active customers — MRR: £{total}")
 
 
 def cmd_customer(cust_id):
     if not cust_id:
         die("usage: crm customer <customer-id>")
-
-    company = dsql_val(f"SELECT company FROM customers WHERE id = '{cust_id}';")
+    company = dsql_val(f"SELECT company FROM customers WHERE id = '{esc(cust_id)}';")
     if not company:
         die(f"unknown customer: {cust_id}")
-
     print(f"# {company}\n")
     dsql(
-        "SELECT id, company, pricing_plan, status, mrr_gbp AS mrr, "
-        "contract_start, contract_end, instance_id, notes "
-        f"FROM customers WHERE id = '{cust_id}';"
+        f"SELECT id, company, company_number, address, notes "
+        f"FROM customers WHERE id = '{esc(cust_id)}';"
     )
-
     print("\n## Contacts")
     dsql(
-        "SELECT id, name, email, role, contact_role "
-        f"FROM contacts WHERE customer_id = '{cust_id}' ORDER BY contact_role, name;"
+        f"SELECT id, name, email, role FROM contacts "
+        f"WHERE customer_id = '{esc(cust_id)}' ORDER BY name;"
+    )
+    print("\n## Contracts")
+    dsql(
+        f"SELECT id, title, status, effective_date, term_months, auto_renew "
+        f"FROM contracts WHERE customer_id = '{esc(cust_id)}' ORDER BY effective_date DESC;"
     )
 
-    print("\n## Deals")
-    dsql(
-        "SELECT d.id, d.title, d.stage, d.value_gbp AS value, d.recurring "
-        "FROM deals d JOIN contacts c ON c.id = d.contact_id "
-        f"WHERE c.customer_id = '{cust_id}' ORDER BY d.opened_date DESC;"
-    )
 
-    print("\n## Recent Interactions")
+def cmd_contracts(filter_=""):
+    if filter_ == "active":
+        dsql(
+            "SELECT id, company, title, effective_date, term_months, auto_renew, "
+            "ROUND(mrr, 2) AS mrr, currency "
+            "FROM contract_summary WHERE status = 'active' ORDER BY company;"
+        )
+    elif filter_ == "draft":
+        dsql(
+            "SELECT id, company, title, line_count, clause_count "
+            "FROM contract_summary WHERE status = 'draft' ORDER BY company;"
+        )
+    else:
+        dsql(
+            "SELECT id, company, title, status, effective_date, "
+            "ROUND(mrr, 2) AS mrr, currency "
+            "FROM contract_summary ORDER BY status, company;"
+        )
+
+
+def cmd_contract(contract_id):
+    if not contract_id:
+        die("usage: crm contract <contract-id>")
+    title = dsql_val(
+        f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';"
+    )
+    if not title:
+        die(f"unknown contract: {contract_id}")
+    print(f"# {title}\n")
     dsql(
-        "SELECT i.interaction_date AS date, c.name, i.channel, i.summary "
-        "FROM interactions i "
-        "JOIN contacts c ON c.id = i.contact_id "
-        f"WHERE c.customer_id = '{cust_id}' "
-        "ORDER BY i.interaction_date DESC LIMIT 10;"
+        f"SELECT ct.id, cu.company, ct.title, ct.status, ct.effective_date, "
+        f"ct.term_months, ct.auto_renew, ct.payment_terms, ct.currency, "
+        f"ct.governing_law, ct.jurisdiction, ct.notice_period_days, ct.notes "
+        f"FROM contracts ct JOIN customers cu ON cu.id = ct.customer_id "
+        f"WHERE ct.id = '{esc(contract_id)}';"
+    )
+    print("\n## Lines")
+    dsql(
+        f"SELECT seq, description, quantity, unit_price, frequency "
+        f"FROM contract_lines WHERE contract_id = '{esc(contract_id)}' ORDER BY seq;"
+    )
+    total_mrr = dsql_val(
+        f"SELECT ROUND(COALESCE(SUM(CASE frequency "
+        f"WHEN 'monthly' THEN quantity * unit_price "
+        f"WHEN 'quarterly' THEN quantity * unit_price / 3 "
+        f"WHEN 'annual' THEN quantity * unit_price / 12 "
+        f"ELSE 0 END), 0), 2) FROM contract_lines "
+        f"WHERE contract_id = '{esc(contract_id)}';"
+    )
+    print(f"\nMRR: £{total_mrr}")
+    print("\n## Clauses")
+    dsql(
+        f"SELECT seq, heading FROM contract_clauses "
+        f"WHERE contract_id = '{esc(contract_id)}' ORDER BY seq;"
     )
 
 
@@ -381,77 +268,371 @@ def cmd_renewals():
     if count == "0":
         print("No renewals due in the next 90 days.")
         return
-
     dsql("SELECT * FROM renewals_due;")
-    total = dsql_val(
-        "SELECT COALESCE(SUM(mrr_gbp), 0) FROM customers "
-        "WHERE status IN ('active', 'churning') "
-        "AND contract_end IS NOT NULL "
-        "AND contract_end <= DATE_ADD(CURRENT_DATE, INTERVAL 90 DAY);"
+
+
+def cmd_find(term):
+    if not term:
+        die("usage: crm find <term>")
+    e = esc(term)
+    dsql(
+        f"SELECT cu.id, cu.company, "
+        f"(SELECT COUNT(*) FROM contracts ct WHERE ct.customer_id = cu.id) AS contracts "
+        f"FROM customers cu "
+        f"WHERE cu.company LIKE '%{e}%' OR cu.id LIKE '%{e}%' "
+        f"ORDER BY cu.company;"
     )
-    print(f"\nAt-risk MRR: £{total}")
+
+
+# ── Write commands ──────────────────────────────────────────────────────────
+
+
+def cmd_add_customer(args):
+    if len(args) < 2:
+        die('usage: crm add <customer-id> "Company Name" [company-number]')
+    cust_id = args[0]
+    company = args[1]
+    co_num = args[2] if len(args) > 2 else ""
+    dsql(
+        f"INSERT INTO customers (id, company, company_number) "
+        f"VALUES ('{esc(cust_id)}', '{esc(company)}', '{esc(co_num)}');"
+    )
+    dolt_commit(f"crm: add customer {company} ({cust_id})")
+    print(f"Added customer: {company} ({cust_id})")
+
+
+def cmd_add_contact(args):
+    if len(args) < 3:
+        die('usage: crm contact <customer-id> "Name" "email" [role]')
+    cust_id, name, email = args[0], args[1], args[2]
+    role = args[3] if len(args) > 3 else ""
+    contact_id = f"{cust_id}-{name.lower().split()[0]}"
+    dsql(
+        f"INSERT INTO contacts (id, customer_id, name, email, role) "
+        f"VALUES ('{esc(contact_id)}', '{esc(cust_id)}', '{esc(name)}', "
+        f"'{esc(email)}', '{esc(role)}');"
+    )
+    dolt_commit(f"crm: add contact {name} at {cust_id}")
+    print(f"Added contact: {name} ({contact_id})")
+
+
+def cmd_new_contract(args):
+    if len(args) < 2:
+        die('usage: crm new <customer-id> "Contract Title"')
+    cust_id = args[0]
+    title = args[1]
+    company = dsql_val(f"SELECT company FROM customers WHERE id = '{esc(cust_id)}';")
+    if not company:
+        die(f"unknown customer: {cust_id}")
+    # generate id: ct-<customer>-<seq>
+    count = dsql_val(
+        f"SELECT COUNT(*) FROM contracts WHERE customer_id = '{esc(cust_id)}';"
+    )
+    seq = int(count) + 1
+    contract_id = f"ct-{cust_id}-{seq}"
+    dsql(
+        f"INSERT INTO contracts (id, customer_id, title) "
+        f"VALUES ('{esc(contract_id)}', '{esc(cust_id)}', '{esc(title)}');"
+    )
+    dolt_commit(f"crm: draft contract {contract_id} — {title}")
+    print(f"Created draft contract: {contract_id}")
+
+
+def cmd_line(args):
+    if len(args) < 4:
+        die('usage: crm line <contract-id> <seq> "description" <unit-price> [frequency]')
+    contract_id, seq_s, desc, price_s = args[0], args[1], args[2], args[3]
+    freq = args[4] if len(args) > 4 else "monthly"
+    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
+    if not title:
+        die(f"unknown contract: {contract_id}")
+    dsql(
+        f"INSERT INTO contract_lines (contract_id, seq, description, unit_price, frequency) "
+        f"VALUES ('{esc(contract_id)}', {seq_s}, '{esc(desc)}', {price_s}, '{esc(freq)}');"
+    )
+    dolt_commit(f"crm: line {seq_s} on {contract_id} — {desc}")
+    print(f"Added line {seq_s}: {desc} @ £{price_s}/{freq}")
+
+
+def cmd_clause(args):
+    if len(args) < 4:
+        die('usage: crm clause <contract-id> <seq> "Heading" "body text"')
+    contract_id, seq_s, heading, body = args[0], args[1], args[2], args[3]
+    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
+    if not title:
+        die(f"unknown contract: {contract_id}")
+    dsql(
+        f"INSERT INTO contract_clauses (contract_id, seq, heading, body) "
+        f"VALUES ('{esc(contract_id)}', {seq_s}, '{esc(heading)}', '{esc(body)}');"
+    )
+    dolt_commit(f"crm: clause {seq_s} on {contract_id} — {heading}")
+    print(f"Added clause {seq_s}: {heading}")
+
+
+def cmd_standard_clauses(contract_id):
+    if not contract_id:
+        die("usage: crm standard-clauses <contract-id>")
+    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
+    if not title:
+        die(f"unknown contract: {contract_id}")
+    existing = dsql_val(
+        f"SELECT COUNT(*) FROM contract_clauses WHERE contract_id = '{esc(contract_id)}';"
+    )
+    start_seq = int(existing) + 1
+    for i, (heading, body) in enumerate(STANDARD_CLAUSES):
+        seq = start_seq + i
+        dsql(
+            f"INSERT INTO contract_clauses (contract_id, seq, heading, body) "
+            f"VALUES ('{esc(contract_id)}', {seq}, '{esc(heading)}', '{esc(body)}');"
+        )
+    dolt_commit(f"crm: standard clauses on {contract_id}")
+    print(f"Added {len(STANDARD_CLAUSES)} standard clauses (seq {start_seq}–{start_seq + len(STANDARD_CLAUSES) - 1})")
+
+
+def cmd_set(args):
+    if len(args) < 3:
+        die("usage: crm set <contract-id> <field> <value>")
+    contract_id, field, value = args[0], args[1], args[2]
+    allowed = {
+        "effective-date": "effective_date",
+        "term": "term_months",
+        "auto-renew": "auto_renew",
+        "payment-terms": "payment_terms",
+        "currency": "currency",
+        "governing-law": "governing_law",
+        "jurisdiction": "jurisdiction",
+        "notice-period": "notice_period_days",
+        "status": "status",
+        "notes": "notes",
+    }
+    col = allowed.get(field)
+    if not col:
+        die(f"unknown field: {field}\nAllowed: {', '.join(sorted(allowed.keys()))}")
+    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
+    if not title:
+        die(f"unknown contract: {contract_id}")
+    if col in ("term_months", "notice_period_days"):
+        dsql(f"UPDATE contracts SET {col} = {value} WHERE id = '{esc(contract_id)}';")
+    elif col == "auto_renew":
+        bval = "TRUE" if value.lower() in ("true", "yes", "1") else "FALSE"
+        dsql(f"UPDATE contracts SET {col} = {bval} WHERE id = '{esc(contract_id)}';")
+    else:
+        dsql(f"UPDATE contracts SET {col} = '{esc(value)}' WHERE id = '{esc(contract_id)}';")
+    dolt_commit(f"crm: set {field}={value} on {contract_id}")
+    print(f"Set {field} = {value} on {contract_id}")
+
+
+def cmd_activate(contract_id):
+    if not contract_id:
+        die("usage: crm activate <contract-id>")
+    title = dsql_val(f"SELECT title FROM contracts WHERE id = '{esc(contract_id)}';")
+    if not title:
+        die(f"unknown contract: {contract_id}")
+    dsql(f"UPDATE contracts SET status = 'active' WHERE id = '{esc(contract_id)}';")
+    dolt_commit(f"crm: activate {contract_id}")
+    print(f"Contract {contract_id} is now active")
+
+
+# ── PDF generation ──────────────────────────────────────────────────────────
+
+
+def generate_pdf(output_file, markdown):
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    subprocess.run(
+        [
+            "pandoc",
+            "--pdf-engine=typst",
+            "-V", "mainfont=Helvetica",
+            "-V", "margin-top=2.5cm",
+            "-V", "margin-bottom=2.5cm",
+            "-V", "margin-left=3cm",
+            "-V", "margin-right=3cm",
+            "-o", output_file,
+        ],
+        input=markdown,
+        text=True,
+        check=True,
+    )
+    print(output_file)
+
+
+def contract_markdown(contract_id):
+    """Build full contract document as markdown."""
+    rows = dsql_rows(
+        f"SELECT ct.id, cu.company, cu.company_number, cu.address, "
+        f"ct.title, ct.status, ct.effective_date, ct.term_months, "
+        f"ct.auto_renew, ct.payment_terms, ct.currency, "
+        f"ct.governing_law, ct.jurisdiction, ct.notice_period_days "
+        f"FROM contracts ct JOIN customers cu ON cu.id = ct.customer_id "
+        f"WHERE ct.id = '{esc(contract_id)}'"
+    )
+    if not rows:
+        return None
+    c = rows[0]
+
+    lines = dsql_rows(
+        f"SELECT seq, description, quantity, unit_price, frequency "
+        f"FROM contract_lines WHERE contract_id = '{esc(contract_id)}' ORDER BY seq"
+    )
+    clauses = dsql_rows(
+        f"SELECT seq, heading, body FROM contract_clauses "
+        f"WHERE contract_id = '{esc(contract_id)}' ORDER BY seq"
+    )
+
+    md = []
+
+    # Title
+    md.append(f"# {c['title']}\n")
+    md.append(f"**Agreement Reference:** {c['id']}\n")
+
+    status_label = c['status'].upper()
+    if status_label == "DRAFT":
+        md.append("**⚠ DRAFT — NOT YET EXECUTED**\n")
+
+    md.append("---\n")
+
+    # Parties
+    md.append("## Parties\n")
+    md.append(f"1. **Provider:** Formabi Ltd\n")
+    customer_line = f"2. **Customer:** {c['company']}"
+    if c.get("company_number"):
+        customer_line += f" (Company No. {c['company_number']})"
+    md.append(customer_line + "\n")
+    if c.get("address"):
+        md.append(f"   Registered address: {c['address']}\n")
+    md.append("")
+
+    # Commercial Terms
+    md.append("## Commercial Terms\n")
+    md.append("| Term | Value |")
+    md.append("|------|-------|")
+    if c.get("effective_date"):
+        md.append(f"| Effective Date | {c['effective_date']} |")
+    if c.get("term_months"):
+        md.append(f"| Term | {c['term_months']} months |")
+    auto = "Yes" if c.get("auto_renew") in ("1", "true", "True", True) else "No"
+    md.append(f"| Auto-Renewal | {auto} |")
+    md.append(f"| Payment Terms | {c.get('payment_terms', 'net-30')} |")
+    md.append(f"| Currency | {c.get('currency', 'GBP')} |")
+    if c.get("notice_period_days"):
+        md.append(f"| Notice Period | {c['notice_period_days']} days |")
+    md.append(f"| Governing Law | {c.get('governing_law', 'England and Wales')} |")
+    md.append(f"| Jurisdiction | {c.get('jurisdiction', 'Courts of England and Wales')} |")
+    md.append("")
+
+    # Service Lines
+    if lines:
+        md.append("## Services and Fees\n")
+        md.append("| # | Description | Qty | Unit Price | Frequency |")
+        md.append("|---|-------------|-----|------------|-----------|")
+        total_annual = 0
+        for ln in lines:
+            qty = float(ln["quantity"])
+            price = float(ln["unit_price"])
+            freq = ln["frequency"]
+            md.append(
+                f"| {ln['seq']} | {ln['description']} | {qty:g} "
+                f"| £{price:,.2f} | {freq} |"
+            )
+            if freq == "monthly":
+                total_annual += qty * price * 12
+            elif freq == "quarterly":
+                total_annual += qty * price * 4
+            elif freq == "annual":
+                total_annual += qty * price
+            elif freq == "one-off":
+                total_annual += qty * price  # show as-is
+
+        md.append("")
+        md.append(f"**Total annual value: £{total_annual:,.2f}**\n")
+
+    # Clauses
+    if clauses:
+        for cl in clauses:
+            md.append(f"## {cl['seq']}. {cl['heading']}\n")
+            md.append(f"{cl['body']}\n")
+
+    # Signature blocks
+    md.append("---\n")
+    md.append("## Execution\n")
+    md.append("This Agreement is executed by the duly authorised representatives "
+              "of each party on the date set out below.\n")
+
+    md.append("**For and on behalf of Formabi Ltd:**\n")
+    md.append("Name: ___________________________\n")
+    md.append("Title: ___________________________\n")
+    md.append("Date: ___________________________\n")
+    md.append("Signature: ___________________________\n")
+    md.append("")
+
+    md.append(f"**For and on behalf of {c['company']}:**\n")
+    md.append("Name: ___________________________\n")
+    md.append("Title: ___________________________\n")
+    md.append("Date: ___________________________\n")
+    md.append("Signature: ___________________________\n")
+
+    return "\n".join(md)
+
+
+def cmd_pdf(contract_id):
+    if not contract_id:
+        die("usage: crm pdf <contract-id>")
+    md = contract_markdown(contract_id)
+    if md is None:
+        die(f"unknown contract: {contract_id}")
+    today = date.today().isoformat()
+    output = os.path.join(DOWNLOADS_DIR, f"{contract_id}-{today}.pdf")
+    generate_pdf(output, md)
+
+
+# ── Help & routing ──────────────────────────────────────────────────────────
 
 
 def cmd_help():
-    print("crm — contacts, deals, pipeline, customers (dolt)")
-    print()
-    print("Usage: crm <command> [args]")
-    print()
-    print("Read:")
-    print("  pipeline                               Pipeline overview")
-    print("  contacts [active]                      List contacts (or active only)")
-    print("  customers [active|all]                 List customer organisations")
-    print("  customer <customer-id>                 Customer detail (contacts, deals, activity)")
-    print("  stale                                  Contacts not contacted in 14+ days")
-    print("  renewals                               Renewals due in next 90 days")
-    print("  find <term>                            Search by company/name/tag")
-    print("  history <contact-id>                   Interaction history")
-    print("  deals [won|lost]                       List deals (open, won, or lost)")
-    print()
-    print("Write:")
-    print('  log <contact-id> "summary"             Log an interaction (guided)')
-    print()
-    print("Reports:")
-    print("  digest                                 Weekly digest")
-    print("  forecast                               Revenue forecast from pipeline")
-    print()
-    print('For raw operations, use: data sql "..."')
+    with open(
+        os.path.join(SURFACE_ROOT, "modules/crm/scripts/help.txt")
+    ) as f:
+        print(f.read(), end="")
 
-
-# --- Routing ---
 
 def main():
     args = sys.argv[1:]
     cmd = args[0] if args else "help"
 
     match cmd:
-        case "pipeline":
-            cmd_pipeline()
-        case "contacts":
-            cmd_contacts(args[1] if len(args) > 1 else "")
+        # read
         case "customers":
-            cmd_customers(args[1] if len(args) > 1 else "")
+            cmd_customers()
         case "customer":
             cmd_customer(args[1] if len(args) > 1 else "")
+        case "contracts":
+            cmd_contracts(args[1] if len(args) > 1 else "")
+        case "contract":
+            cmd_contract(args[1] if len(args) > 1 else "")
         case "renewals":
             cmd_renewals()
-        case "stale":
-            cmd_stale()
         case "find":
             cmd_find(args[1] if len(args) > 1 else "")
-        case "history":
-            cmd_history(args[1] if len(args) > 1 else "")
-        case "log":
-            cmd_log(
-                args[1] if len(args) > 1 else "",
-                args[2] if len(args) > 2 else "",
-            )
-        case "deals":
-            cmd_deals(args[1] if len(args) > 1 else "")
-        case "digest":
-            cmd_digest()
-        case "forecast":
-            cmd_forecast()
+        # write
+        case "add":
+            cmd_add_customer(args[1:])
+        case "contact":
+            cmd_add_contact(args[1:])
+        case "new":
+            cmd_new_contract(args[1:])
+        case "line":
+            cmd_line(args[1:])
+        case "clause":
+            cmd_clause(args[1:])
+        case "standard-clauses":
+            cmd_standard_clauses(args[1] if len(args) > 1 else "")
+        case "set":
+            cmd_set(args[1:])
+        case "activate":
+            cmd_activate(args[1] if len(args) > 1 else "")
+        # output
+        case "pdf":
+            cmd_pdf(args[1] if len(args) > 1 else "")
         case _:
             cmd_help()
 

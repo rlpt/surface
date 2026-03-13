@@ -74,77 +74,68 @@ CREATE TABLE pool_members (
 );
 
 -- ============================================================
--- CRM
+-- CRM (customer contract management)
 -- ============================================================
 
 CREATE TABLE customers (
   id VARCHAR(50) PRIMARY KEY,
   company VARCHAR(200) NOT NULL,
-  pricing_plan VARCHAR(50),
-  status VARCHAR(20) NOT NULL DEFAULT 'onboarding'
-    CHECK (status IN ('onboarding', 'active', 'churning', 'churned')),
-  contract_start DATE,
-  contract_end DATE,
-  mrr_gbp DECIMAL(10,2),
-  instance_id VARCHAR(100),
+  company_number VARCHAR(50),
+  address TEXT,
   notes TEXT,
   created_at DATE NOT NULL DEFAULT (CURRENT_DATE)
 );
 
 CREATE TABLE contacts (
   id VARCHAR(50) PRIMARY KEY,
-  customer_id VARCHAR(50),
-  company VARCHAR(200) NOT NULL,
+  customer_id VARCHAR(50) NOT NULL,
   name VARCHAR(200) NOT NULL,
   email VARCHAR(200),
   role VARCHAR(100),
-  contact_role VARCHAR(20)
-    CHECK (contact_role IN ('champion', 'admin', 'billing', 'user', 'executive')),
-  source VARCHAR(50),
-  stage VARCHAR(20) NOT NULL DEFAULT 'lead'
-    CHECK (stage IN ('lead', 'prospect', 'customer', 'churned', 'dormant')),
   notes TEXT,
   created_at DATE NOT NULL DEFAULT (CURRENT_DATE),
-  last_contacted DATE,
-  next_action_date DATE,
-  next_action TEXT,
   FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
-CREATE TABLE interactions (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  contact_id VARCHAR(50) NOT NULL,
-  interaction_date DATE NOT NULL DEFAULT (CURRENT_DATE),
-  channel VARCHAR(20) NOT NULL
-    CHECK (channel IN ('email', 'call', 'meeting', 'demo', 'slack', 'event', 'other')),
-  direction VARCHAR(10) NOT NULL DEFAULT 'outbound'
-    CHECK (direction IN ('inbound', 'outbound')),
-  summary TEXT NOT NULL,
-  follow_up TEXT,
-  FOREIGN KEY (contact_id) REFERENCES contacts(id),
-  INDEX idx_interaction_date (interaction_date)
-);
-
-CREATE TABLE deals (
+CREATE TABLE contracts (
   id VARCHAR(50) PRIMARY KEY,
-  contact_id VARCHAR(50) NOT NULL,
+  customer_id VARCHAR(50) NOT NULL,
   title VARCHAR(200) NOT NULL,
-  stage VARCHAR(20) NOT NULL DEFAULT 'qualifying'
-    CHECK (stage IN ('qualifying', 'proposal', 'negotiation', 'closed-won', 'closed-lost')),
-  value_gbp DECIMAL(10,2),
-  recurring VARCHAR(10) CHECK (recurring IN ('monthly', 'annual', 'one-off')),
-  opened_date DATE NOT NULL DEFAULT (CURRENT_DATE),
-  closed_date DATE,
-  lost_reason TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'active', 'expired', 'terminated')),
+  effective_date DATE,
+  term_months INT,
+  auto_renew BOOLEAN DEFAULT FALSE,
+  payment_terms VARCHAR(50) DEFAULT 'net-30',
+  currency CHAR(3) NOT NULL DEFAULT 'GBP',
+  governing_law VARCHAR(100) DEFAULT 'England and Wales',
+  jurisdiction VARCHAR(100) DEFAULT 'Courts of England and Wales',
+  notice_period_days INT DEFAULT 30,
   notes TEXT,
-  FOREIGN KEY (contact_id) REFERENCES contacts(id)
+  created_at DATE NOT NULL DEFAULT (CURRENT_DATE),
+  FOREIGN KEY (customer_id) REFERENCES customers(id),
+  INDEX idx_contract_status (status)
 );
 
-CREATE TABLE tags (
-  contact_id VARCHAR(50) NOT NULL,
-  tag VARCHAR(50) NOT NULL,
-  PRIMARY KEY (contact_id, tag),
-  FOREIGN KEY (contact_id) REFERENCES contacts(id)
+CREATE TABLE contract_lines (
+  contract_id VARCHAR(50) NOT NULL,
+  seq INT NOT NULL,
+  description VARCHAR(500) NOT NULL,
+  quantity DECIMAL(10,2) NOT NULL DEFAULT 1,
+  unit_price DECIMAL(10,2) NOT NULL,
+  frequency VARCHAR(20) NOT NULL DEFAULT 'monthly'
+    CHECK (frequency IN ('monthly', 'quarterly', 'annual', 'one-off')),
+  PRIMARY KEY (contract_id, seq),
+  FOREIGN KEY (contract_id) REFERENCES contracts(id)
+);
+
+CREATE TABLE contract_clauses (
+  contract_id VARCHAR(50) NOT NULL,
+  seq INT NOT NULL,
+  heading VARCHAR(200) NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (contract_id, seq),
+  FOREIGN KEY (contract_id) REFERENCES contracts(id)
 );
 
 -- ============================================================
@@ -240,47 +231,44 @@ LEFT JOIN (
   SELECT share_class, SUM(shares_held) AS issued FROM holdings GROUP BY share_class
 ) i ON i.share_class = sc.name;
 
-CREATE VIEW pipeline AS
+CREATE VIEW contract_summary AS
 SELECT
-  d.stage,
-  COUNT(*) AS deals,
-  SUM(d.value_gbp) AS total_value,
-  GROUP_CONCAT(c.company ORDER BY d.value_gbp DESC) AS companies
-FROM deals d
-JOIN contacts c ON c.id = d.contact_id
-WHERE d.stage NOT IN ('closed-won', 'closed-lost')
-GROUP BY d.stage
-ORDER BY FIELD(d.stage, 'qualifying', 'proposal', 'negotiation');
-
-CREATE VIEW stale_contacts AS
-SELECT
-  id, company, name, stage, last_contacted, next_action, next_action_date
-FROM contacts
-WHERE stage IN ('lead', 'prospect')
-  AND (last_contacted IS NULL OR last_contacted < DATE_SUB(CURRENT_DATE, INTERVAL 14 DAY))
-ORDER BY last_contacted ASC;
-
-CREATE VIEW customer_overview AS
-SELECT
-  cu.id,
+  ct.id,
   cu.company,
-  cu.pricing_plan,
-  cu.status,
-  cu.mrr_gbp AS mrr,
-  cu.contract_end,
-  COUNT(DISTINCT c.id) AS contacts,
-  COALESCE(SUM(CASE WHEN d.stage = 'closed-won' THEN d.value_gbp ELSE 0 END), 0) AS won_value
-FROM customers cu
-LEFT JOIN contacts c ON c.customer_id = cu.id
-LEFT JOIN deals d ON d.contact_id = c.id
-GROUP BY cu.id, cu.company, cu.pricing_plan, cu.status, cu.mrr_gbp, cu.contract_end;
+  ct.title,
+  ct.status,
+  ct.effective_date,
+  ct.term_months,
+  ct.auto_renew,
+  ct.currency,
+  COALESCE(SUM(CASE cl.frequency
+    WHEN 'monthly' THEN cl.quantity * cl.unit_price
+    WHEN 'quarterly' THEN cl.quantity * cl.unit_price / 3
+    WHEN 'annual' THEN cl.quantity * cl.unit_price / 12
+    ELSE 0
+  END), 0) AS mrr,
+  COUNT(DISTINCT cl.seq) AS line_count,
+  COUNT(DISTINCT cc.seq) AS clause_count
+FROM contracts ct
+JOIN customers cu ON cu.id = ct.customer_id
+LEFT JOIN contract_lines cl ON cl.contract_id = ct.id
+LEFT JOIN contract_clauses cc ON cc.contract_id = ct.id
+GROUP BY ct.id, cu.company, ct.title, ct.status, ct.effective_date,
+  ct.term_months, ct.auto_renew, ct.currency;
 
 CREATE VIEW renewals_due AS
 SELECT
-  id, company, pricing_plan, status, mrr_gbp AS mrr, contract_end,
-  DATEDIFF(contract_end, CURRENT_DATE) AS days_left
-FROM customers
-WHERE status IN ('active', 'churning')
-  AND contract_end IS NOT NULL
-  AND contract_end <= DATE_ADD(CURRENT_DATE, INTERVAL 90 DAY)
-ORDER BY contract_end ASC;
+  ct.id,
+  cu.company,
+  ct.title,
+  ct.status,
+  ct.auto_renew,
+  DATE_ADD(ct.effective_date, INTERVAL ct.term_months MONTH) AS expiry_date,
+  DATEDIFF(DATE_ADD(ct.effective_date, INTERVAL ct.term_months MONTH), CURRENT_DATE) AS days_left
+FROM contracts ct
+JOIN customers cu ON cu.id = ct.customer_id
+WHERE ct.status = 'active'
+  AND ct.term_months IS NOT NULL
+  AND DATE_ADD(ct.effective_date, INTERVAL ct.term_months MONTH)
+      <= DATE_ADD(CURRENT_DATE, INTERVAL 90 DAY)
+ORDER BY expiry_date ASC;

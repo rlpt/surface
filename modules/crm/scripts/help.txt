@@ -1,13 +1,16 @@
-CRM (contacts, deals, customers, pipeline — dolt):
-  crm pipeline                               Pipeline overview
-  crm contacts [active]                      List contacts (or active only)
-  crm customers [active|all]                 List customer organisations
-  crm customer <customer-id>                 Customer detail (contacts, deals, activity)
-  crm renewals                               Renewals due in next 90 days
-  crm stale                                  Contacts not contacted in 14+ days
-  crm find <term>                            Search by company/name/tag
-  crm log <contact-id> "summary"             Log an interaction
-  crm history <contact-id>                   Interaction history
-  crm deals [won|lost]                       List deals (open, won, or lost)
-  crm digest                                 Weekly digest
-  crm forecast                               Revenue forecast from pipeline
+crm (customer contract management — dolt):
+  crm customers                                List all customers
+  crm customer <customer-id>                   Customer detail (contacts, contracts)
+  crm contracts [active|draft]                 List contracts
+  crm contract <contract-id>                   Contract detail (terms, lines, clauses)
+  crm renewals                                 Contracts expiring within 90 days
+  crm find <term>                              Search customers by name
+  crm add <id> "Company" [company-number]      Add a customer
+  crm contact <customer-id> "Name" "email" [role]  Add a contact
+  crm new <customer-id> "Contract Title"       Create a draft contract
+  crm line <contract-id> <seq> "desc" <price> [frequency]  Add a line item
+  crm clause <contract-id> <seq> "heading" "body"  Add a clause
+  crm standard-clauses <contract-id>           Add standard legal clauses
+  crm set <contract-id> <field> <value>        Set contract field
+  crm activate <contract-id>                   Set contract status to active
+  crm pdf <contract-id>                        Generate contract PDF (→ downloads/)
