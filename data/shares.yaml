@@ -43,6 +43,14 @@ share_events:
   holder_id: richard
   share_class: ordinary
   quantity: 7079
+- event_date: 2026-03-14
+  event_type: grant
+  holder_id: bobert
+  share_class: ordinary
+  quantity: 337
+  vesting_start: 2026-03-14
+  vesting_months: 48
+  cliff_months: 12
 pools:
 - name: founder
   share_class: ordinary
