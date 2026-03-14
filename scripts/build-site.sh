@@ -16,9 +16,6 @@ export BRAND_ACCENT="${BRAND_ACCENT:-#a78bfa}"
 export BRAND_BG="${BRAND_BG:-#0a0a1a}"
 export BRAND_TEXT="${BRAND_TEXT:-#e0e0e0}"
 
-echo "==> Building dashboard HTML"
-python3 "$SURFACE_ROOT/modules/dashboard/scripts/dashboard.py" build "$SITE_DIR/dashboard"
-
 echo "==> Building board HTML"
 python3 "$SURFACE_ROOT/modules/board/scripts/board.py" html "$SITE_DIR/board"
 
@@ -59,12 +56,6 @@ cat > "$SITE_DIR/index.html" << 'INDEXEOF'
 <body>
 <h1>Surface</h1>
 <p>Company-as-code output</p>
-<div class="section">
-  <h2>Dashboard</h2>
-  <ul>
-    <li><a href="dashboard/">Overview</a></li>
-  </ul>
-</div>
 <div class="section">
   <h2>Board</h2>
   <ul>
