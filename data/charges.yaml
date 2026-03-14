@@ -1,0 +1,11 @@
+charges:
+  - id: chg-001
+    charge_code: "MR01-20250901"
+    created_date: 2025-09-01
+    description: Fixed and floating charge over all assets
+    chargee: Acme Bank plc
+    amount: 50000
+    currency: GBP
+    status: outstanding
+    delivered_date: 2025-09-05
+    satisfied_date:

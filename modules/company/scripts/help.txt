@@ -1,0 +1,8 @@
+Company (company details register):
+  company show                                     Display company details
+  company check                                    Validate company data
+  company set <field> <value>                      Update a top-level field
+  company set-address <line1> <city> <post> [cc]   Update registered address
+  company add-sic <code>                           Add a SIC code
+  company remove-sic <code>                        Remove a SIC code
+  company pdf summary                              Generate company summary PDF

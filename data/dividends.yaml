@@ -1,0 +1,10 @@
+dividends:
+  - id: div-001
+    declaration_date: 2025-12-15
+    payment_date: 2025-12-31
+    share_class: ordinary
+    amount_per_share: 0.10
+    currency: GBP
+    tax_voucher_ref: TV-2025-001
+    status: paid
+    resolution_id: bm-2025-12-15-r1

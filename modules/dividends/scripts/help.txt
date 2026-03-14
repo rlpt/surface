@@ -1,0 +1,8 @@
+Dividends (dividend declarations and payments):
+  dividends list                                   List all dividends
+  dividends show <id>                              Show dividend details
+  dividends check                                  Validate dividend data
+  dividends declare <class> <amount> [resolution]  Declare a dividend
+  dividends pay <id>                               Mark dividend as paid
+  dividends pdf register                           Generate dividend register PDF
+  dividends pdf voucher <id>                       Generate tax voucher PDF

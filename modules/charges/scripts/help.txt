@@ -1,0 +1,7 @@
+Charges (register of charges):
+  charges list                                     List all charges
+  charges show <id>                                Show charge details
+  charges check                                    Validate charge data
+  charges register <id> "desc" <chargee> <amount>  Register a new charge
+  charges satisfy <id>                             Mark charge as satisfied
+  charges pdf register                             Generate register of charges PDF
