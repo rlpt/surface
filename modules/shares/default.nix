@@ -2,13 +2,11 @@
 
 {
   name = "shares";
-  description = "Share allocation tracking — cap table (dolt)";
+  description = "Share allocation tracking — cap table";
   packages = with pkgs; [
     pandoc
     typst
     (python3.withPackages (ps: with ps; [
-      google-api-python-client
-      google-auth-oauthlib
       openpyxl
     ]))
   ];

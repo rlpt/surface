@@ -38,17 +38,6 @@ shares model round 500000 2000000         # simulate funding round dilution
 shares model pool-expand founder 1000     # model pool expansion impact
 ```
 
-## Google Sheets export
-
-Requires two env vars:
-- `GOOGLE_SERVICE_ACCOUNT_KEY` — path to service account JSON key file
-- `SHARES_SHEET_ID` — the spreadsheet ID from the Google Sheets URL
-
-```bash
-shares push all          # push all tabs (Cap Table, History, Holders, Pools)
-shares push table        # push just the cap table
-```
-
 ## Commands
 
 Read:
@@ -74,4 +63,3 @@ Write:
 
 Export:
 - `shares pdf table|history|holder <id>|vesting [holder]|certificate <holder> [class]|transfer <from> <to> <class> <qty>` — generate PDF
-- `shares push table|history|holders|pools|all` — push to Google Sheets

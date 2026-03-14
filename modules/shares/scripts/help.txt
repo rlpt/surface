@@ -10,5 +10,4 @@ Shares (cap table management):
   shares grant <holder> <class> <qty> [--vesting-months N] [--cliff-months N]
   shares transfer <from> <to> <class> <qty> Transfer shares
   shares add-holder <id> "Name"             Add a shareholder
-  shares push <table|history|holders|pools|all>  Push to Google Sheets
   shares pdf <table|history|holder|vesting|certificate|transfer>

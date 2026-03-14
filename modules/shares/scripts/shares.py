@@ -2,7 +2,6 @@
 """shares — cap table management (toml)"""
 
 import os
-import subprocess
 import sys
 from datetime import date
 
@@ -519,13 +518,6 @@ def cmd_pool_add(args):
     print(f"Added {holders_map[holder]} to pool {pool}")
 
 
-def cmd_push(args):
-    subcmd = args[0] if args else ""
-    script = os.path.join(SURFACE_ROOT, "modules/shares/scripts/push.py")
-    env = {**os.environ, "PYTHONPATH": ""}
-    subprocess.run(["python3", script, subcmd] + args[1:], env=env, check=True)
-
-
 # --- PDF helpers ---
 
 
@@ -781,9 +773,6 @@ def cmd_help():
     print()
     print("Export:")
     print("  pdf <table|history|holder|vesting|certificate|transfer>")
-    print("  push <table|history|holders|pools|all>  Push to Google Sheets")
-    print()
-    print("  push requires: GOOGLE_SERVICE_ACCOUNT_KEY, SHARES_SHEET_ID")
 
 
 # --- Routing ---
@@ -822,8 +811,6 @@ def main():
             cmd_add_pool(args[1:])
         case "pool-add":
             cmd_pool_add(args[1:])
-        case "push":
-            cmd_push(args[1:])
         case "pdf":
             cmd_pdf(args[1:])
         case _:
