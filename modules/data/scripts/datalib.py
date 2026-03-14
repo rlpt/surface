@@ -609,6 +609,22 @@ def generate_branded_pdf(output_file, markdown):
     )
     typst_body = result.stdout
 
+    # Post-process: pandoc emits #horizontalrule for markdown '---' but
+    # typst has no built-in horizontalrule variable.  Replace with a line.
+    typst_body = typst_body.replace(
+        "#horizontalrule",
+        "#line(length: 100%, stroke: 0.5pt + luma(180))",
+    )
+
+    # Post-process: make tables span full page width with equal fractional columns.
+    # Pandoc emits "columns: N," — replace with fractional widths.
+    import re
+    def _fix_table_columns(m):
+        n = int(m.group(1))
+        fracs = ", ".join(["1fr"] * n)
+        return f"columns: ({fracs})"
+    typst_body = re.sub(r"\bcolumns: (\d+),\n", lambda m: _fix_table_columns(m) + ",\n", typst_body)
+
     # Step 2: Build a typst document that imports the template
     # Logo path relative to the template file (both in modules/brand/)
     logo_line = '  logo-path: "logo.svg",' if os.path.exists(logo) else ""

@@ -83,8 +83,14 @@
   }
 
   // Tables
-  set table(stroke: 0.5pt + luma(200), inset: 6pt)
-  show table.cell.where(y: 0): set text(weight: "bold", fill: brand-dark, size: 9pt)
+  set table(stroke: 0.5pt + luma(200), inset: 5pt)
+  show table: set text(size: 8pt)
+  show table.cell: it => {
+    // Allow optional line-breaking after hyphens in table cells (dates, IDs, etc.)
+    show regex("-"): m => [-\u{200B}]
+    it
+  }
+  show table.cell.where(y: 0): set text(weight: "bold", fill: brand-dark, size: 8pt)
 
   body
 }

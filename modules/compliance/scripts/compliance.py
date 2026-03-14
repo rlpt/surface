@@ -164,7 +164,7 @@ def cmd_pdf_calendar():
     data = datalib.load("compliance")
     deadlines = sorted(data.get("deadlines", []), key=lambda x: x["due_date"])
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"compliance-calendar-{today}.pdf")
+    output = os.path.join(DOWNLOADS_DIR, f"{today}-compliance-calendar.pdf")
 
     lines = [f"# Formabi Ltd — Compliance Calendar\n", f"Generated: {today}\n"]
     lines.append("| Deadline | Due Date | Frequency | Category | Status |")
