@@ -4,8 +4,11 @@ Company data stored as YAML files in `data/` at the project root, versioned by g
 
 ## Files
 
+- `data/company.yaml` — company details (name, number, address, SIC codes)
 - `data/shares.yaml` — share classes, holders, events, pools, pool members
 - `data/officers.yaml` — company officers (directors, secretary, PSC)
+- `data/charges.yaml` — register of charges (secured loans, debentures)
+- `data/dividends.yaml` — dividend declarations and payments
 - `data/compliance.yaml` — statutory compliance deadlines
 - `data/board.yaml` — meetings, attendees, minutes, resolutions
 
@@ -33,7 +36,18 @@ datalib.vesting_schedule(share_data) # per-holder vesting status
 datalib.compliance_upcoming(comp_data) # deadlines due within 90 days
 datalib.changelog(domain, since)     # structured git log for a domain
 datalib.print_table(rows)            # formatted CLI output
+datalib.generate_branded_pdf(out, md) # markdown → PDF with letterhead + auto Drive upload
 ```
+
+## Google Drive sync
+
+All PDFs generated via `generate_branded_pdf` are automatically uploaded to Google Drive via rclone when `GDRIVE_REMOTE` is set.
+
+Setup:
+1. `rclone config` — create a Google Drive remote (e.g. named "gdrive")
+2. Set `GDRIVE_REMOTE=gdrive:formabi/documents` in `.env`
+
+Silent no-op if `GDRIVE_REMOTE` is not set or rclone is not installed.
 
 ## Linting
 
