@@ -9,6 +9,7 @@
     (python3.withPackages (ps: with ps; [
       google-api-python-client
       google-auth-oauthlib
+      openpyxl
     ]))
   ];
   scripts = [

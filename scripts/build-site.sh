@@ -46,9 +46,14 @@ python3 "$SURFACE_ROOT/modules/charges/scripts/charges.py" pdf register || echo 
 # Dividends
 python3 "$SURFACE_ROOT/modules/dividends/scripts/dividends.py" pdf register || echo "    (no dividends data)"
 
-# Copy generated PDFs to site
+# Spreadsheet
+echo "==> Generating spreadsheet"
+python3 "$SURFACE_ROOT/scripts/export-xlsx.py" || echo "    (xlsx export failed)"
+
+# Copy generated files to site
 mkdir -p "$SITE_DIR/downloads"
 cp -v "$SURFACE_ROOT/downloads/"*.pdf "$SITE_DIR/downloads/" 2>/dev/null || echo "    (no PDFs generated)"
+cp -v "$SURFACE_ROOT/downloads/"*.xlsx "$SITE_DIR/downloads/" 2>/dev/null || echo "    (no xlsx generated)"
 
 # Generate a top-level index page linking to everything
 cat > "$SITE_DIR/index.html" << 'INDEXEOF'
