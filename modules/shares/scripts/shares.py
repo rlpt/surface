@@ -21,16 +21,39 @@ def die(msg):
 # --- Read commands ---
 
 
+def _vested_lookup(data):
+    """Build {(holder_id, share_class): vested_qty} from vesting schedule.
+
+    Caps vested at current holdings (transfers may reduce held below total vested).
+    """
+    vs = datalib.vesting_schedule(data)
+    lookup = {}
+    for v in vs:
+        key = (v["holder_id"], v["share_class"])
+        lookup[key] = lookup.get(key, 0) + v["vested"]
+    # Cap at current holdings
+    h = datalib.holdings(data)
+    held = {}
+    for r in h:
+        key = (r["holder_id"], r["share_class"])
+        held[key] = held.get(key, 0) + r["shares_held"]
+    for key in lookup:
+        if key in held:
+            lookup[key] = min(lookup[key], held[key])
+    return lookup
+
+
 def cmd_table():
     data = datalib.load("shares")
     ct = datalib.cap_table(data)
+    vested = _vested_lookup(data)
     rows = [
         {
             "holder": r["holder"],
             "class": r["class"],
             "held": r["held"],
             "pct": f"{r['pct']}%",
-            "vested": r["held"],
+            "vested": vested.get((r["holder_id"], r["class"]), r["held"]),
         }
         for r in ct
     ]
@@ -308,8 +331,10 @@ def cmd_brief():
 
     print("## holdings")
     ct = datalib.cap_table(data)
+    vested = _vested_lookup(data)
     for r in ct:
-        print(f"  {r['holder']}  {r['class']}  held={r['held']} ({r['pct']}%)  vested={r['held']}")
+        v = vested.get((r["holder_id"], r["class"]), r["held"])
+        print(f"  {r['holder']}  {r['class']}  held={r['held']} ({r['pct']}%)  vested={v}")
     print()
 
     print("## availability")
@@ -517,13 +542,15 @@ def cmd_pdf_table():
 
     lines = [f"# Formabi — Cap Table\n", f"Generated: {today}\n"]
 
+    vested = _vested_lookup(data)
     if total == 0:
         lines.append("No shares issued.")
     else:
         lines.append("| Holder | Class | Held | % | Vested |")
         lines.append("|--------|-------|-----:|--:|-------:|")
         for r in ct:
-            lines.append(f"| {r['holder']} | {r['class']} | {r['held']} | {r['pct']}% | {r['held']} |")
+            v = vested.get((r["holder_id"], r["class"]), r["held"])
+            lines.append(f"| {r['holder']} | {r['class']} | {r['held']} | {r['pct']}% | {v} |")
         lines.append(f"\n**Total issued:** {total}")
 
     generate_pdf(output, "\n".join(lines))
@@ -575,6 +602,7 @@ def cmd_pdf_holder(holder_id):
     today = date.today().isoformat()
     output = os.path.join(DOWNLOADS_DIR, f"{today}-{holder_id}-statement.pdf")
 
+    vested = _vested_lookup(data)
     lines = [
         "# Formabi — Holder Statement\n",
         f"**Holder:** {name}\n",
@@ -584,7 +612,8 @@ def cmd_pdf_holder(holder_id):
         "|-------|-----:|--:|-------:|",
     ]
     for r in holder_ct:
-        lines.append(f"| {r['class']} | {r['held']} | {r['pct']}% | {r['held']} |")
+        v = vested.get((r["holder_id"], r["class"]), r["held"])
+        lines.append(f"| {r['class']} | {r['held']} | {r['pct']}% | {v} |")
 
     lines.append(f"\n**Total shares:** {htotal}\n")
 
