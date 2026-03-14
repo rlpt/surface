@@ -22,11 +22,29 @@ python3 "$SURFACE_ROOT/modules/board/scripts/board.py" html "$SITE_DIR/board"
 echo "==> Generating PDFs"
 mkdir -p "$SURFACE_ROOT/downloads"
 
-# Board PDFs
-python3 "$SURFACE_ROOT/modules/board/scripts/board.py" pdf pack || echo "    (no board data for PDF)"
+# Board
+python3 "$SURFACE_ROOT/modules/board/scripts/board.py" pdf pack || echo "    (no board data)"
+python3 "$SURFACE_ROOT/modules/board/scripts/board.py" pdf resolutions || echo "    (no resolutions)"
 
-# Shares PDFs
-python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" pdf table || echo "    (no shares data for PDF)"
+# Shares
+python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" pdf table || echo "    (no shares data)"
+python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" pdf history || echo "    (no share history)"
+python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" pdf vesting || echo "    (no vesting data)"
+
+# Company
+python3 "$SURFACE_ROOT/modules/company/scripts/company.py" pdf summary || echo "    (no company data)"
+
+# Officers
+python3 "$SURFACE_ROOT/modules/officers/scripts/officers.py" pdf register || echo "    (no officers data)"
+
+# Compliance
+python3 "$SURFACE_ROOT/modules/compliance/scripts/compliance.py" pdf calendar || echo "    (no compliance data)"
+
+# Charges
+python3 "$SURFACE_ROOT/modules/charges/scripts/charges.py" pdf register || echo "    (no charges data)"
+
+# Dividends
+python3 "$SURFACE_ROOT/modules/dividends/scripts/dividends.py" pdf register || echo "    (no dividends data)"
 
 # Copy generated PDFs to site
 mkdir -p "$SITE_DIR/downloads"
