@@ -862,13 +862,13 @@ def cmd_pdf_meeting(meeting_id):
     if md is None:
         die(f"meeting '{meeting_id}' not found")
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-{meeting_id}.pdf")
+    output = os.path.join(DOWNLOADS_DIR, f"{meeting_id}.pdf")
     generate_pdf(output, md)
 
 
 def cmd_pdf_resolutions():
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-board-resolutions.pdf")
+    output = os.path.join(DOWNLOADS_DIR, "board-resolutions.pdf")
 
     data = datalib.load("board")
     meetings_map = {m["id"]: m for m in data.get("board_meetings", [])}
@@ -899,7 +899,7 @@ def cmd_pdf_resolutions():
 
 def cmd_pdf_pack():
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-board-pack.pdf")
+    output = os.path.join(DOWNLOADS_DIR, "board-pack.pdf")
 
     data = datalib.load("board")
     meetings = sorted(

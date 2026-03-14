@@ -538,7 +538,7 @@ def cmd_pdf_table():
     ct = datalib.cap_table(data)
     total = sum(r["held"] for r in ct)
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-cap-table.pdf")
+    output = os.path.join(DOWNLOADS_DIR, "cap-table.pdf")
 
     lines = [f"# Formabi — Cap Table\n", f"Generated: {today}\n"]
 
@@ -561,7 +561,7 @@ def cmd_pdf_history():
     holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
     events = data.get("share_events", [])
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-share-history.pdf")
+    output = os.path.join(DOWNLOADS_DIR, "share-history.pdf")
 
     lines = [
         f"# Formabi — Share History\n",
@@ -600,7 +600,7 @@ def cmd_pdf_holder(holder_id):
     holder_events.sort(key=lambda e: (str(e.get("event_date", "")), 0))
 
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-{holder_id}-statement.pdf")
+    output = os.path.join(DOWNLOADS_DIR, f"{holder_id}-statement.pdf")
 
     vested = _vested_lookup(data)
     lines = [
@@ -634,7 +634,7 @@ def cmd_pdf_vesting(filter_=""):
         vs = [v for v in vs if v["holder_id"] == filter_]
     today = date.today().isoformat()
     suffix = f"-{filter_}" if filter_ else ""
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-vesting-schedule{suffix}.pdf")
+    output = os.path.join(DOWNLOADS_DIR, f"vesting-schedule{suffix}.pdf")
 
     lines = [f"# Formabi — Vesting Schedule\n", f"Generated: {today}\n"]
     if filter_:
@@ -674,7 +674,7 @@ def cmd_pdf_certificate(args):
         die(f"no holdings found for {holder_id}" + (f" in class {cls_filter}" if cls_filter else ""))
 
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-certificate-{holder_id}.pdf")
+    output = os.path.join(DOWNLOADS_DIR, f"certificate-{holder_id}.pdf")
 
     lines = [f"# Share Certificate\n"]
     lines.append(f"**Formabi Ltd**\n")
@@ -706,7 +706,7 @@ def cmd_pdf_transfer(args):
         die(f"unknown holder: {to}")
 
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-transfer-{frm}-{to}.pdf")
+    output = os.path.join(DOWNLOADS_DIR, f"transfer-{frm}-{to}.pdf")
 
     lines = [f"# Stock Transfer Form\n"]
     lines.append(f"**Formabi Ltd**\n")

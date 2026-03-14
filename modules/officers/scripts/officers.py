@@ -124,7 +124,7 @@ def cmd_pdf_register():
     data = datalib.load("officers")
     officers = data.get("officers", [])
     today = date.today().isoformat()
-    output = os.path.join(DOWNLOADS_DIR, f"{today}-officers-register.pdf")
+    output = os.path.join(DOWNLOADS_DIR, "officers-register.pdf")
 
     lines = [f"# Formabi Ltd — Register of Directors and Secretary\n", f"Generated: {today}\n"]
 
