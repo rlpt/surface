@@ -1,0 +1,19 @@
+company:
+  name: Formabi Ltd
+  company_number: "12345678"
+  jurisdiction: england-wales
+  company_type: private-limited
+  incorporation_date: 2025-06-01
+  registered_address:
+    line_1: 10 Example Street
+    line_2: Suite 4
+    city: London
+    postcode: EC1A 1BB
+    country: GB
+  sic_codes:
+    - "62012"
+    - "62020"
+  accounting_reference_date: "06-30"
+  articles: model-articles-private
+  brand:
+    body_font: Source Sans 3

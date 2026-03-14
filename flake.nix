@@ -58,6 +58,8 @@
           pkgs.git
           pkgs.jq
           pkgs.dolt
+          pkgs.rclone
+          pkgs.source-sans
           halp
           whoami-surface
           onboard
@@ -79,6 +81,9 @@
           shellHook = ''
             # Set SURFACE_ROOT to the actual working directory (not nix store)
             export SURFACE_ROOT="$PWD"
+
+            # Font path for typst PDF generation
+            export TYPST_FONT_PATHS="${pkgs.source-sans}/share/fonts"
 
             # Ensure our custom scripts shadow coreutils (whoami)
             export PATH="${whoami-surface}/bin:$PATH"

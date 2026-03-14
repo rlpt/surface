@@ -36,6 +36,9 @@ def load(domain):
     # Normalise: convert date objects to ISO strings for consistency
     result = {}
     for key, rows in data.items():
+        if isinstance(rows, dict):
+            result[key] = _normalise_row(rows)
+            continue
         if not isinstance(rows, list):
             result[key] = rows
             continue
@@ -52,6 +55,8 @@ def save(domain, data):
     for key, rows in data.items():
         if isinstance(rows, list):
             out[key] = [_prepare_row(row) for row in rows]
+        elif isinstance(rows, dict):
+            out[key] = _prepare_row(rows)
         else:
             out[key] = rows
     with open(path, "w") as f:
@@ -100,7 +105,8 @@ def _prepare_row(row):
 _DATE_SUFFIXES = ("_date", "_start", "_at")
 _DATE_NAMES = ("effective_date", "event_date", "meeting_date", "txn_date",
                "voted_date", "vesting_start", "appointed_date", "resigned_date",
-               "filed_date", "due_date")
+               "filed_date", "due_date", "incorporation_date", "created_date",
+               "delivered_date", "satisfied_date", "declaration_date", "payment_date")
 
 
 def _is_date_key(key):
@@ -161,6 +167,38 @@ SCHEMAS = {
             },
         },
     },
+    "charges": {
+        "charges": {
+            "required": ["id", "created_date", "description", "chargee", "amount", "status"],
+            "types": {"id": str, "charge_code": str, "created_date": str,
+                       "description": str, "chargee": str, "amount": int,
+                       "currency": str, "status": str, "delivered_date": str,
+                       "satisfied_date": str},
+            "values": {"status": ["outstanding", "satisfied"]},
+        },
+    },
+    "dividends": {
+        "dividends": {
+            "required": ["id", "declaration_date", "share_class", "amount_per_share", "status"],
+            "types": {"id": str, "declaration_date": str, "payment_date": str,
+                       "share_class": str, "amount_per_share": (int, float),
+                       "currency": str, "tax_voucher_ref": str, "status": str,
+                       "resolution_id": str},
+            "values": {"status": ["declared", "paid", "cancelled"]},
+        },
+    },
+    "company": {
+        "company": {
+            "required": ["name", "company_number", "jurisdiction", "company_type", "incorporation_date"],
+            "types": {"name": str, "company_number": str, "jurisdiction": str,
+                       "company_type": str, "incorporation_date": str,
+                       "accounting_reference_date": str, "articles": str},
+            "values": {
+                "jurisdiction": ["england-wales", "scotland", "northern-ireland"],
+                "company_type": ["private-limited", "public-limited", "llp", "unlimited"],
+            },
+        },
+    },
     "board": {
         "board_meetings": {
             "required": ["id", "meeting_date", "title"],
@@ -197,6 +235,8 @@ def lint(domain, data):
 
     for table_name, table_schema in schema.items():
         rows = data.get(table_name, [])
+        if isinstance(rows, dict):
+            rows = [rows]
         if not isinstance(rows, list):
             continue
         required = table_schema.get("required", [])
@@ -536,7 +576,7 @@ def generate_branded_pdf(output_file, markdown):
             [
                 "pandoc",
                 "--pdf-engine=typst",
-                "-V", "mainfont=Helvetica",
+                "-V", "mainfont=Source Sans 3",
                 "-V", "margin-top=2cm",
                 "-V", "margin-bottom=2cm",
                 "-V", "margin-left=2cm",
@@ -548,6 +588,7 @@ def generate_branded_pdf(output_file, markdown):
             check=True,
         )
         print(output_file)
+        _upload_to_drive(output_file)
         return
 
     # Step 1: Convert markdown to typst markup via pandoc
@@ -606,3 +647,34 @@ def generate_branded_pdf(output_file, markdown):
         os.unlink(tmp_path)
 
     print(output_file)
+    _upload_to_drive(output_file)
+
+
+# ---------------------------------------------------------------------------
+# Google Drive upload (via rclone)
+# ---------------------------------------------------------------------------
+
+def _upload_to_drive(file_path):
+    """Upload a file to Google Drive via rclone. Silent no-op if GDRIVE_REMOTE not set.
+
+    Requires:
+      GDRIVE_REMOTE — rclone remote and path (e.g. "gdrive:formabi/documents")
+
+    Rclone must be configured with a Google Drive remote (run: rclone config).
+    """
+    remote = os.environ.get("GDRIVE_REMOTE")
+    if not remote:
+        return
+
+    try:
+        filename = os.path.basename(file_path)
+        result = subprocess.run(
+            ["rclone", "copyto", file_path, f"{remote}/{filename}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            print(f"  -> uploaded to Drive")
+        else:
+            print(f"  -> Drive upload failed: {result.stderr.strip()}", file=sys.stderr)
+    except FileNotFoundError:
+        print(f"  -> Drive upload skipped (rclone not found)", file=sys.stderr)

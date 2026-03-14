@@ -61,7 +61,7 @@
   )
 
   // Typography
-  set text(font: "Helvetica", size: 10pt, fill: luma(30))
+  set text(font: "Source Sans 3", size: 10pt, fill: luma(30))
   set par(justify: true, leading: 0.65em)
 
   // Headings
