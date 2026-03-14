@@ -34,27 +34,17 @@ ACCT_DATA = {
     ],
 }
 
-CRM_DATA = {
-    "customers": [
-        {"id": "acme", "company": "Acme Corp", "company_number": "12345678",
-         "address": "123 Main St", "notes": "", "created_at": "2026-03-01"},
+OFFICERS_DATA = {
+    "officers": [
+        {"id": "richard", "person_name": "Richard Targett", "role": "director", "appointed_date": "2025-06-15"},
     ],
-    "contacts": [
-        {"id": "acme-jane", "customer_id": "acme", "name": "Jane Smith",
-         "email": "jane@acme.com", "role": "CTO", "notes": "", "created_at": "2026-03-01"},
+}
+
+COMPLIANCE_DATA = {
+    "deadlines": [
+        {"id": "test-1", "title": "Annual accounts", "due_date": "2026-06-15",
+         "frequency": "annual", "category": "companies-house", "status": "upcoming"},
     ],
-    "contracts": [
-        {"id": "ct-acme-1", "customer_id": "acme", "title": "SaaS Agreement",
-         "status": "active", "effective_date": "2026-04-01", "term_months": 12,
-         "auto_renew": False, "payment_terms": "net-30", "currency": "GBP",
-         "governing_law": "England and Wales", "jurisdiction": "Courts of England and Wales",
-         "notice_period_days": 30, "notes": "", "created_at": "2026-03-01"},
-    ],
-    "contract_lines": [
-        {"contract_id": "ct-acme-1", "seq": 1, "description": "Platform licence",
-         "quantity": 1, "unit_price": 200.0, "frequency": "monthly"},
-    ],
-    "contract_clauses": [],
 }
 
 
@@ -141,7 +131,8 @@ class TestPage(unittest.TestCase):
         self.assertIn("Overview", result)
         self.assertIn("Cap Table", result)
         self.assertIn("Accounts", result)
-        self.assertIn("CRM", result)
+        self.assertIn("Officers", result)
+        self.assertIn("Compliance", result)
 
     def test_active_nav(self):
         result = dashboard.page("Title", "body", "index")
@@ -160,13 +151,19 @@ class TestPage(unittest.TestCase):
 
 
 class TestBuildPages(unittest.TestCase):
+    @patch("datalib.changelog")
     @patch("datalib.load")
-    def test_build_index(self, mock_load):
-        mock_load.side_effect = lambda d: {"shares": SHARES_DATA, "accounts": ACCT_DATA, "crm": CRM_DATA}[d]
+    def test_build_index(self, mock_load, mock_changelog):
+        mock_load.side_effect = lambda d: {
+            "shares": SHARES_DATA, "accounts": ACCT_DATA,
+            "officers": OFFICERS_DATA, "compliance": COMPLIANCE_DATA,
+        }[d]
+        mock_changelog.return_value = []
         html = dashboard.build_index()
         self.assertIn("Overview", html)
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("Shareholders", html)
+        self.assertIn("Officers", html)
 
     @patch("datalib.load")
     def test_build_cap_table(self, mock_load):
@@ -183,11 +180,18 @@ class TestBuildPages(unittest.TestCase):
         self.assertIn("assets:bank:tide", html)
 
     @patch("datalib.load")
-    def test_build_crm(self, mock_load):
-        mock_load.return_value = CRM_DATA
-        html = dashboard.build_crm()
-        self.assertIn("CRM", html)
-        self.assertIn("Acme Corp", html)
+    def test_build_officers(self, mock_load):
+        mock_load.return_value = OFFICERS_DATA
+        html = dashboard.build_officers()
+        self.assertIn("Officers", html)
+        self.assertIn("Richard Targett", html)
+
+    @patch("datalib.load")
+    def test_build_compliance(self, mock_load):
+        mock_load.return_value = COMPLIANCE_DATA
+        html = dashboard.build_compliance()
+        self.assertIn("Compliance", html)
+        self.assertIn("Annual accounts", html)
 
 
 class TestRouting(unittest.TestCase):

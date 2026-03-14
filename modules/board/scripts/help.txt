@@ -1,12 +1,14 @@
-board (meetings, minutes, resolutions — dolt):
+board (meetings, minutes, resolutions):
   board meetings                             List all board meetings
   board meeting <meeting-id>                 Meeting detail (attendees, minutes, resolutions)
   board resolutions [pending|passed|all]     List resolutions (default: all)
   board minutes <meeting-id>                 Show minutes for a meeting
+  board template list                        Show available resolution templates
+  board template <name> <meeting-id> [key=value ...]  Apply template
   board html [dir]                           Generate HTML board pack (default: out/board)
-  board pdf pack                             Full board pack as PDF (→ downloads/)
-  board pdf meeting <meeting-id>             Single meeting as PDF (→ downloads/)
-  board pdf resolutions                      All resolutions as PDF (→ downloads/)
+  board pdf pack                             Full board pack as PDF
+  board pdf meeting <meeting-id>             Single meeting as PDF
+  board pdf resolutions                      All resolutions as PDF
   board serve [dir]                          Build and serve on localhost:8001
   board new <date> <title>                   Create a new meeting
   board attend <meeting-id> <person> [role]  Add attendee (role: chair, secretary, director, observer)

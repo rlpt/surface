@@ -123,6 +123,124 @@ def cmd_pools():
     datalib.print_table(rows, ["pool", "class", "budget", "issued", "avail", "members"])
 
 
+def cmd_vesting(filter_=""):
+    data = datalib.load("shares")
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    vs = datalib.vesting_schedule(data)
+    if filter_:
+        vs = [v for v in vs if v["holder_id"] == filter_]
+    rows = [
+        {
+            "holder": holders_map.get(v["holder_id"], v["holder_id"]),
+            "class": v["share_class"],
+            "granted": v["total_granted"],
+            "vested": v["vested"],
+            "unvested": v["unvested"],
+            "pct": f"{v['pct_vested']}%",
+            "cliff": v["cliff_date"],
+            "fully_vested": v["fully_vested_date"],
+        }
+        for v in vs
+    ]
+    datalib.print_table(rows, ["holder", "class", "granted", "vested", "unvested", "pct", "cliff", "fully_vested"])
+
+
+def cmd_model_round(args):
+    if len(args) < 2:
+        die("usage: shares model round <amount> <pre-money>")
+    amount = float(args[0])
+    pre_money = float(args[1])
+
+    data = datalib.load("shares")
+    ct = datalib.cap_table(data)
+    total_shares = sum(r["held"] for r in ct)
+
+    if total_shares == 0:
+        die("no shares issued — cannot model round")
+
+    post_money = pre_money + amount
+    dilution = amount / post_money
+    new_shares = int(total_shares * amount / pre_money)
+
+    print(f"Funding Round Model")
+    print(f"  Investment:   {amount:,.0f}")
+    print(f"  Pre-money:    {pre_money:,.0f}")
+    print(f"  Post-money:   {post_money:,.0f}")
+    print(f"  Dilution:     {dilution * 100:.1f}%")
+    print(f"  New shares:   {new_shares:,}")
+    print()
+
+    print(f"{'Holder':<20} {'Class':<12} {'Current':>10} {'Pre %':>8} {'Post %':>8}")
+    print("-" * 62)
+    post_total = total_shares + new_shares
+    for r in ct:
+        pre_pct = r["held"] * 100.0 / total_shares
+        post_pct = r["held"] * 100.0 / post_total
+        print(f"{r['holder']:<20} {r['class']:<12} {r['held']:>10,} {pre_pct:>7.1f}% {post_pct:>7.1f}%")
+    print(f"{'[New Investor]':<20} {'':12} {new_shares:>10,} {'':>8} {dilution * 100:>7.1f}%")
+    print(f"{'TOTAL':<20} {'':12} {post_total:>10,} {'100.0%':>8} {'100.0%':>8}")
+
+
+def cmd_model_pool_expand(args):
+    if len(args) < 2:
+        die("usage: shares model pool-expand <pool> <additional>")
+    pool_name = args[0]
+    additional = int(args[1])
+
+    data = datalib.load("shares")
+    pools = data.get("pools", [])
+    pool = None
+    for p in pools:
+        if p["name"] == pool_name:
+            pool = p
+            break
+    if not pool:
+        die(f"unknown pool: {pool_name}")
+
+    ct = datalib.cap_table(data)
+    total_shares = sum(r["held"] for r in ct)
+    ca = datalib.class_availability(data)
+    avail = 0
+    for c in ca:
+        if c["class"] == pool["share_class"]:
+            avail = c["available"]
+
+    new_budget = pool["budget"] + additional
+    post_total = total_shares + additional
+
+    print(f"Pool Expansion Model: {pool_name}")
+    print(f"  Current budget:  {pool['budget']:,}")
+    print(f"  Additional:      {additional:,}")
+    print(f"  New budget:      {new_budget:,}")
+    print(f"  Available in class: {avail}")
+    print()
+
+    print(f"{'Holder':<20} {'Class':<12} {'Current':>10} {'Pre %':>8} {'Post %':>8}")
+    print("-" * 62)
+    for r in ct:
+        pre_pct = r["held"] * 100.0 / total_shares if total_shares else 0
+        post_pct = r["held"] * 100.0 / post_total if post_total else 0
+        print(f"{r['holder']:<20} {r['class']:<12} {r['held']:>10,} {pre_pct:>7.1f}% {post_pct:>7.1f}%")
+    dilution_pct = additional * 100.0 / post_total if post_total else 0
+    print(f"{'[Pool expansion]':<20} {'':12} {additional:>10,} {'':>8} {dilution_pct:>7.1f}%")
+
+
+def cmd_model(args):
+    if not args:
+        die("usage: shares model <round|pool-expand> [args]")
+    match args[0]:
+        case "round":
+            cmd_model_round(args[1:])
+        case "pool-expand":
+            cmd_model_pool_expand(args[1:])
+        case _:
+            print("Usage: shares model <round|pool-expand>")
+            print()
+            print("Scenarios:")
+            print("  round <amount> <pre-money>       Simulate funding round dilution")
+            print("  pool-expand <pool> <additional>   Model pool expansion impact")
+
+
 def cmd_check():
     data = datalib.load("shares")
     events = data.get("share_events", [])
@@ -205,8 +323,22 @@ def cmd_brief():
 
 def cmd_grant(args):
     if len(args) < 3:
-        die("usage: shares grant <holder-id> <class> <quantity>")
+        die("usage: shares grant <holder-id> <class> <quantity> [--vesting-months N] [--cliff-months N]")
     holder, cls, qty = args[0], args[1], int(args[2])
+
+    # Parse optional flags
+    vesting_months = None
+    cliff_months = None
+    i = 3
+    while i < len(args):
+        if args[i] == "--vesting-months" and i + 1 < len(args):
+            vesting_months = int(args[i + 1])
+            i += 2
+        elif args[i] == "--cliff-months" and i + 1 < len(args):
+            cliff_months = int(args[i + 1])
+            i += 2
+        else:
+            i += 1
 
     data = datalib.load("shares")
 
@@ -229,17 +361,29 @@ def cmd_grant(args):
         die(f"insufficient shares: requested {qty} but only {avail} available in class '{cls}'")
 
     today = date.today().isoformat()
-    data.setdefault("share_events", []).append({
+    event = {
         "event_date": today,
         "event_type": "grant",
         "holder_id": holder,
         "share_class": cls,
         "quantity": qty,
-    })
+    }
+    if vesting_months:
+        event["vesting_start"] = today
+        event["vesting_months"] = vesting_months
+        event["cliff_months"] = cliff_months or 0
+    data.setdefault("share_events", []).append(event)
     datalib.save("shares", data)
-    datalib.git_commit(f"grant {qty} {cls} to {holder}")
 
-    print(f"Granted {qty} {cls} shares to {hname}\n")
+    msg = f"grant {qty} {cls} to {holder}"
+    if vesting_months:
+        msg += f" (vesting: {vesting_months}m, cliff: {cliff_months or 0}m)"
+    datalib.git_commit(msg)
+
+    print(f"Granted {qty} {cls} shares to {hname}")
+    if vesting_months:
+        print(f"  Vesting: {vesting_months} months, cliff: {cliff_months or 0} months")
+    print()
     cmd_table()
 
 
@@ -361,23 +505,7 @@ def cmd_push(args):
 
 
 def generate_pdf(output_file, markdown):
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    subprocess.run(
-        [
-            "pandoc",
-            "--pdf-engine=typst",
-            "-V", "mainfont=Helvetica",
-            "-V", "margin-top=2cm",
-            "-V", "margin-bottom=2cm",
-            "-V", "margin-left=2cm",
-            "-V", "margin-right=2cm",
-            "-o", output_file,
-        ],
-        input=markdown,
-        text=True,
-        check=True,
-    )
-    print(output_file)
+    datalib.generate_branded_pdf(output_file, markdown)
 
 
 def cmd_pdf_table():
@@ -469,6 +597,104 @@ def cmd_pdf_holder(holder_id):
     generate_pdf(output, "\n".join(lines))
 
 
+def cmd_pdf_vesting(filter_=""):
+    data = datalib.load("shares")
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    vs = datalib.vesting_schedule(data)
+    if filter_:
+        vs = [v for v in vs if v["holder_id"] == filter_]
+    today = date.today().isoformat()
+    suffix = f"-{filter_}" if filter_ else ""
+    output = os.path.join(DOWNLOADS_DIR, f"vesting-schedule{suffix}-{today}.pdf")
+
+    lines = [f"# Formabi — Vesting Schedule\n", f"Generated: {today}\n"]
+    if filter_:
+        name = holders_map.get(filter_, filter_)
+        lines.append(f"**Holder:** {name}\n")
+
+    lines.append("| Holder | Class | Granted | Vested | Unvested | % Vested | Cliff | Fully Vested |")
+    lines.append("|--------|-------|--------:|-------:|---------:|---------:|-------|--------------|")
+    for v in vs:
+        name = holders_map.get(v["holder_id"], v["holder_id"])
+        lines.append(
+            f"| {name} | {v['share_class']} | {v['total_granted']} | {v['vested']} "
+            f"| {v['unvested']} | {v['pct_vested']}% | {v['cliff_date']} | {v['fully_vested_date']} |"
+        )
+
+    generate_pdf(output, "\n".join(lines))
+
+
+def cmd_pdf_certificate(args):
+    if len(args) < 1:
+        die("usage: shares pdf certificate <holder> [class]")
+    holder_id = args[0]
+    cls_filter = args[1] if len(args) > 1 else None
+
+    data = datalib.load("shares")
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    if holder_id not in holders_map:
+        die(f"unknown holder: {holder_id}")
+    name = holders_map[holder_id]
+
+    h = datalib.holdings(data)
+    holder_holdings = [r for r in h if r["holder_id"] == holder_id]
+    if cls_filter:
+        holder_holdings = [r for r in holder_holdings if r["share_class"] == cls_filter]
+
+    if not holder_holdings:
+        die(f"no holdings found for {holder_id}" + (f" in class {cls_filter}" if cls_filter else ""))
+
+    today = date.today().isoformat()
+    output = os.path.join(DOWNLOADS_DIR, f"certificate-{holder_id}-{today}.pdf")
+
+    lines = [f"# Share Certificate\n"]
+    lines.append(f"**Formabi Ltd**\n")
+    lines.append(f"Certificate Date: {today}\n")
+    lines.append(f"---\n")
+    lines.append(f"This is to certify that **{name}** is the registered holder of:\n")
+
+    for r in holder_holdings:
+        lines.append(f"- **{r['shares_held']:,}** {r['share_class']} shares\n")
+
+    lines.append(f"\nGiven under the common seal of the company.\n")
+    lines.append(f"\n---\n")
+    lines.append(f"Director: ____________________\n")
+    lines.append(f"\nSecretary: ____________________\n")
+
+    generate_pdf(output, "\n".join(lines))
+
+
+def cmd_pdf_transfer(args):
+    if len(args) < 4:
+        die("usage: shares pdf transfer <from> <to> <class> <qty>")
+    frm, to, cls, qty = args[0], args[1], args[2], int(args[3])
+
+    data = datalib.load("shares")
+    holders_map = {h["id"]: h["display_name"] for h in data.get("holders", [])}
+    if frm not in holders_map:
+        die(f"unknown holder: {frm}")
+    if to not in holders_map:
+        die(f"unknown holder: {to}")
+
+    today = date.today().isoformat()
+    output = os.path.join(DOWNLOADS_DIR, f"transfer-{frm}-{to}-{today}.pdf")
+
+    lines = [f"# Stock Transfer Form\n"]
+    lines.append(f"**Formabi Ltd**\n")
+    lines.append(f"Date: {today}\n")
+    lines.append(f"---\n")
+    lines.append(f"**Transferor:** {holders_map[frm]}\n")
+    lines.append(f"**Transferee:** {holders_map[to]}\n")
+    lines.append(f"**Share class:** {cls}\n")
+    lines.append(f"**Quantity:** {qty:,}\n")
+    lines.append(f"\n---\n")
+    lines.append(f"Signed by Transferor: ____________________\n")
+    lines.append(f"\nSigned by Transferee: ____________________\n")
+    lines.append(f"\nWitnessed by: ____________________\n")
+
+    generate_pdf(output, "\n".join(lines))
+
+
 def cmd_pdf(args):
     subcmd = args[0] if args else ""
     match subcmd:
@@ -478,19 +704,28 @@ def cmd_pdf(args):
             cmd_pdf_history()
         case "holder":
             cmd_pdf_holder(args[1] if len(args) > 1 else "")
+        case "vesting":
+            cmd_pdf_vesting(args[1] if len(args) > 1 else "")
+        case "certificate":
+            cmd_pdf_certificate(args[1:])
+        case "transfer":
+            cmd_pdf_transfer(args[1:])
         case _:
-            print("Usage: shares pdf <table|history|holder <id>>")
+            print("Usage: shares pdf <table|history|holder <id>|vesting [holder]|certificate <holder> [class]|transfer <from> <to> <class> <qty>>")
             print()
             print("Report types:")
-            print("  table              Cap table summary as PDF")
-            print("  history            Full share event history as PDF")
-            print("  holder <id>        Individual holder statement as PDF")
+            print("  table                          Cap table summary as PDF")
+            print("  history                        Full share event history as PDF")
+            print("  holder <id>                    Individual holder statement as PDF")
+            print("  vesting [holder]               Vesting schedule as PDF")
+            print("  certificate <holder> [class]   Share certificate as PDF")
+            print("  transfer <from> <to> <class> <qty>  Stock transfer form as PDF")
             print()
             print("PDFs are saved to downloads/")
 
 
 def cmd_help():
-    print("shares — cap table management (toml)")
+    print("shares — cap table management")
     print()
     print("Usage: shares <command> [args]")
     print()
@@ -499,19 +734,24 @@ def cmd_help():
     print("  export                             Cap table as CSV")
     print("  holders                            List all shareholders")
     print("  history [holder]                   Share events (optionally filtered)")
+    print("  vesting [holder]                   Vesting schedules")
     print("  pools                              Pool budgets and usage")
     print("  check                              Validate consistency")
     print("  brief                              Context dump for agent warm-up")
     print()
+    print("Modelling:")
+    print("  model round <amount> <pre-money>   Simulate funding round dilution")
+    print("  model pool-expand <pool> <qty>     Model pool expansion impact")
+    print()
     print("Write:")
-    print("  grant <holder> <class> <qty>       Grant shares")
+    print("  grant <holder> <class> <qty> [--vesting-months N] [--cliff-months N]")
     print("  transfer <from> <to> <class> <qty> Transfer shares")
     print('  add-holder <id> "Name"             Add a shareholder')
     print("  add-pool <name> <class> <budget>   Create a share pool")
     print("  pool-add <pool> <holder>           Add holder to pool")
     print()
     print("Export:")
-    print("  pdf <table|history|holder <id>>    Generate PDF")
+    print("  pdf <table|history|holder|vesting|certificate|transfer>")
     print("  push <table|history|holders|pools|all>  Push to Google Sheets")
     print()
     print("  push requires: GOOGLE_SERVICE_ACCOUNT_KEY, SHARES_SHEET_ID")
@@ -533,12 +773,16 @@ def main():
             cmd_holders()
         case "history":
             cmd_history(args[1] if len(args) > 1 else "")
+        case "vesting":
+            cmd_vesting(args[1] if len(args) > 1 else "")
         case "pools":
             cmd_pools()
         case "check":
             cmd_check()
         case "brief":
             cmd_brief()
+        case "model":
+            cmd_model(args[1:])
         case "grant":
             cmd_grant(args[1:])
         case "transfer":

@@ -1,0 +1,7 @@
+Officers (company officers register):
+  officers list                            Current officers with roles and dates
+  officers history                         Full appointment/resignation history
+  officers appoint <id> "Name" <role>      Appoint a new officer
+  officers resign <id>                     Record officer resignation
+  officers check                           Validate officer data
+  officers pdf register                    Generate register of directors PDF

@@ -1,0 +1,7 @@
+Compliance (statutory deadline tracking):
+  compliance upcoming                      Deadlines within 90 days (colour-coded)
+  compliance list [category]               All deadlines
+  compliance add <id> "title" <due-date> <frequency> <category>  Add deadline
+  compliance file <id>                     Mark deadline as filed
+  compliance check                         Flag overdue items
+  compliance pdf calendar                  Annual compliance calendar PDF

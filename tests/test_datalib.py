@@ -1,6 +1,5 @@
-"""Tests for datalib — shared CSV data layer."""
+"""Tests for datalib — shared YAML data layer."""
 
-import csv
 import os
 import shutil
 import sys
@@ -9,57 +8,6 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "modules", "data", "scripts"))
 import datalib
-
-
-# ---------------------------------------------------------------------------
-# Type coercion
-# ---------------------------------------------------------------------------
-
-class TestCoerceTypes(unittest.TestCase):
-    def test_integer(self):
-        self.assertEqual(datalib._coerce_types({"v": "42"})["v"], 42)
-
-    def test_negative_integer(self):
-        self.assertEqual(datalib._coerce_types({"v": "-5"})["v"], -5)
-
-    def test_float(self):
-        self.assertAlmostEqual(datalib._coerce_types({"v": "3.14"})["v"], 3.14)
-
-    def test_bool_true(self):
-        self.assertIs(datalib._coerce_types({"v": "true"})["v"], True)
-
-    def test_bool_false(self):
-        self.assertIs(datalib._coerce_types({"v": "false"})["v"], False)
-
-    def test_string(self):
-        self.assertEqual(datalib._coerce_types({"v": "hello"})["v"], "hello")
-
-    def test_empty_string(self):
-        self.assertEqual(datalib._coerce_types({"v": ""})["v"], "")
-
-    def test_date_stays_string(self):
-        self.assertEqual(datalib._coerce_types({"v": "2026-03-01"})["v"], "2026-03-01")
-
-    def test_path_stays_string(self):
-        self.assertEqual(datalib._coerce_types({"v": "assets:bank:tide"})["v"], "assets:bank:tide")
-
-    def test_leading_zeros_stay_string(self):
-        # "007" should not become 7
-        self.assertEqual(datalib._coerce_types({"v": "007"})["v"], "007")
-
-
-class TestCsvVal(unittest.TestCase):
-    def test_bool_true(self):
-        self.assertEqual(datalib._csv_val(True), "true")
-
-    def test_bool_false(self):
-        self.assertEqual(datalib._csv_val(False), "false")
-
-    def test_int_passthrough(self):
-        self.assertEqual(datalib._csv_val(42), 42)
-
-    def test_string_passthrough(self):
-        self.assertEqual(datalib._csv_val("hello"), "hello")
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +49,8 @@ class TestLoadSave(unittest.TestCase):
     def test_round_trip_types(self):
         data = {
             "rows": [
-                {"name": "test", "count": 42, "price": 9.99, "active": True, "date": "2026-01-01"},
+                {"name": "test", "count": 42, "price": 9.99, "active": True,
+                 "event_date": "2026-01-01"},
             ],
         }
         datalib.save("test", data)
@@ -111,26 +60,25 @@ class TestLoadSave(unittest.TestCase):
         self.assertEqual(row["count"], 42)
         self.assertAlmostEqual(row["price"], 9.99)
         self.assertIs(row["active"], True)
-        self.assertEqual(row["date"], "2026-01-01")
+        self.assertEqual(row["event_date"], "2026-01-01")
 
-    def test_empty_table_removes_file(self):
-        datalib.save("test", {"items": [{"v": 1}]})
-        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, "test", "items.csv")))
+    def test_empty_list_preserved(self):
         datalib.save("test", {"items": []})
-        self.assertFalse(os.path.exists(os.path.join(self.tmpdir, "test", "items.csv")))
-
-    def test_load_ignores_non_csv(self):
-        domain_dir = os.path.join(self.tmpdir, "test")
-        os.makedirs(domain_dir)
-        with open(os.path.join(domain_dir, "notes.txt"), "w") as f:
-            f.write("ignore me")
-        with open(os.path.join(domain_dir, "items.csv"), "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["id"])
-            writer.writeheader()
-            writer.writerow({"id": "a"})
         loaded = datalib.load("test")
-        self.assertIn("items", loaded)
-        self.assertNotIn("notes", loaded)
+        self.assertEqual(loaded["items"], [])
+
+    def test_date_round_trip(self):
+        """Dates in YAML are loaded as date objects but normalised to ISO strings."""
+        data = {
+            "share_events": [
+                {"event_date": "2024-06-01", "event_type": "grant",
+                 "holder_id": "alice", "share_class": "ordinary", "quantity": 100},
+            ],
+        }
+        datalib.save("test", data)
+        loaded = datalib.load("test")
+        self.assertEqual(loaded["share_events"][0]["event_date"], "2024-06-01")
+        self.assertIsInstance(loaded["share_events"][0]["event_date"], str)
 
 
 # ---------------------------------------------------------------------------
@@ -297,112 +245,109 @@ class TestAccountBalances(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# contract_summary()
+# vesting_schedule()
 # ---------------------------------------------------------------------------
 
-class TestContractSummary(unittest.TestCase):
-    def test_no_contracts(self):
-        data = {"customers": [], "contracts": [], "contract_lines": [], "contract_clauses": []}
-        self.assertEqual(datalib.contract_summary(data), [])
+class TestVestingSchedule(unittest.TestCase):
+    def test_no_vesting_fully_vested(self):
+        data = {"share_events": [
+            {"event_date": "2024-01-01", "event_type": "grant",
+             "holder_id": "alice", "share_class": "ordinary", "quantity": 100},
+        ]}
+        result = datalib.vesting_schedule(data)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["vested"], 100)
+        self.assertEqual(result[0]["unvested"], 0)
+        self.assertEqual(result[0]["pct_vested"], 100.0)
 
-    def test_mrr_calculation_monthly(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contracts": [{"id": "ct-1", "customer_id": "acme", "title": "SaaS", "status": "active"}],
-            "contract_lines": [
-                {"contract_id": "ct-1", "seq": 1, "description": "Licence",
-                 "quantity": 1, "unit_price": 200.0, "frequency": "monthly"},
-            ],
-            "contract_clauses": [],
-        }
-        result = datalib.contract_summary(data)
-        self.assertEqual(result[0]["mrr"], 200.0)
-        self.assertEqual(result[0]["company"], "Acme Corp")
+    def test_vesting_in_progress(self):
+        # Grant with 48-month vesting, 12-month cliff, started 24 months ago
+        from datetime import date, timedelta
+        start = date.today() - timedelta(days=730)  # ~24 months ago
+        data = {"share_events": [
+            {"event_date": "2024-01-01", "event_type": "grant",
+             "holder_id": "alice", "share_class": "ordinary", "quantity": 480,
+             "vesting_start": start.isoformat(), "vesting_months": 48,
+             "cliff_months": 12},
+        ]}
+        result = datalib.vesting_schedule(data)
+        self.assertEqual(len(result), 1)
+        # Should be approximately half vested
+        self.assertGreater(result[0]["vested"], 0)
+        self.assertLess(result[0]["vested"], 480)
+        self.assertEqual(result[0]["total_granted"], 480)
 
-    def test_mrr_calculation_quarterly(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contracts": [{"id": "ct-1", "customer_id": "acme", "title": "SaaS", "status": "active"}],
-            "contract_lines": [
-                {"contract_id": "ct-1", "seq": 1, "description": "Support",
-                 "quantity": 1, "unit_price": 300.0, "frequency": "quarterly"},
-            ],
-            "contract_clauses": [],
-        }
-        result = datalib.contract_summary(data)
-        self.assertEqual(result[0]["mrr"], 100.0)
+    def test_before_cliff(self):
+        from datetime import date, timedelta
+        start = date.today() - timedelta(days=30)  # 1 month ago
+        data = {"share_events": [
+            {"event_date": "2024-01-01", "event_type": "grant",
+             "holder_id": "alice", "share_class": "ordinary", "quantity": 480,
+             "vesting_start": start.isoformat(), "vesting_months": 48,
+             "cliff_months": 12},
+        ]}
+        result = datalib.vesting_schedule(data)
+        self.assertEqual(result[0]["vested"], 0)
 
-    def test_mrr_calculation_annual(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contracts": [{"id": "ct-1", "customer_id": "acme", "title": "SaaS", "status": "active"}],
-            "contract_lines": [
-                {"contract_id": "ct-1", "seq": 1, "description": "Annual",
-                 "quantity": 1, "unit_price": 1200.0, "frequency": "annual"},
-            ],
-            "contract_clauses": [],
-        }
-        result = datalib.contract_summary(data)
-        self.assertEqual(result[0]["mrr"], 100.0)
-
-    def test_one_off_not_in_mrr(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contracts": [{"id": "ct-1", "customer_id": "acme", "title": "SaaS", "status": "active"}],
-            "contract_lines": [
-                {"contract_id": "ct-1", "seq": 1, "description": "Setup",
-                 "quantity": 1, "unit_price": 5000.0, "frequency": "one-off"},
-            ],
-            "contract_clauses": [],
-        }
-        result = datalib.contract_summary(data)
-        self.assertEqual(result[0]["mrr"], 0.0)
-
-    def test_line_and_clause_counts(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contracts": [{"id": "ct-1", "customer_id": "acme", "title": "SaaS", "status": "active"}],
-            "contract_lines": [
-                {"contract_id": "ct-1", "seq": 1, "description": "A", "quantity": 1, "unit_price": 100, "frequency": "monthly"},
-                {"contract_id": "ct-1", "seq": 2, "description": "B", "quantity": 1, "unit_price": 50, "frequency": "monthly"},
-            ],
-            "contract_clauses": [
-                {"contract_id": "ct-1", "seq": 1, "heading": "Terms", "body": "..."},
-            ],
-        }
-        result = datalib.contract_summary(data)
-        self.assertEqual(result[0]["line_count"], 2)
-        self.assertEqual(result[0]["clause_count"], 1)
+    def test_transfers_ignored(self):
+        data = {"share_events": [
+            {"event_date": "2024-01-01", "event_type": "transfer-in",
+             "holder_id": "alice", "share_class": "ordinary", "quantity": 100},
+        ]}
+        result = datalib.vesting_schedule(data)
+        self.assertEqual(len(result), 0)
 
 
 # ---------------------------------------------------------------------------
-# renewals_due()
+# compliance_upcoming()
 # ---------------------------------------------------------------------------
 
-class TestRenewalsDue(unittest.TestCase):
-    def test_no_active_contracts(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contracts": [{"id": "ct-1", "customer_id": "acme", "title": "SaaS",
-                           "status": "draft", "effective_date": "2024-01-01", "term_months": 1}],
-        }
-        self.assertEqual(datalib.renewals_due(data), [])
+class TestComplianceUpcoming(unittest.TestCase):
+    def test_no_deadlines(self):
+        data = {"deadlines": []}
+        self.assertEqual(datalib.compliance_upcoming(data), [])
 
-    def test_far_future_not_included(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contracts": [{"id": "ct-1", "customer_id": "acme", "title": "SaaS",
-                           "status": "active", "effective_date": "2026-01-01", "term_months": 120}],
-        }
-        self.assertEqual(datalib.renewals_due(data), [])
+    def test_upcoming_within_90_days(self):
+        from datetime import date, timedelta
+        due = (date.today() + timedelta(days=30)).isoformat()
+        data = {"deadlines": [
+            {"id": "test-1", "title": "Test deadline", "due_date": due,
+             "frequency": "annual", "category": "companies-house", "status": "upcoming"},
+        ]}
+        result = datalib.compliance_upcoming(data)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], "test-1")
 
-    def test_missing_effective_date_skipped(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contracts": [{"id": "ct-1", "customer_id": "acme", "title": "SaaS",
-                           "status": "active", "term_months": 1}],
-        }
-        self.assertEqual(datalib.renewals_due(data), [])
+    def test_far_future_excluded(self):
+        from datetime import date, timedelta
+        due = (date.today() + timedelta(days=200)).isoformat()
+        data = {"deadlines": [
+            {"id": "test-1", "title": "Test deadline", "due_date": due,
+             "frequency": "annual", "category": "companies-house", "status": "upcoming"},
+        ]}
+        result = datalib.compliance_upcoming(data)
+        self.assertEqual(len(result), 0)
+
+    def test_filed_excluded(self):
+        from datetime import date, timedelta
+        due = (date.today() + timedelta(days=30)).isoformat()
+        data = {"deadlines": [
+            {"id": "test-1", "title": "Test deadline", "due_date": due,
+             "frequency": "annual", "category": "companies-house", "status": "filed"},
+        ]}
+        result = datalib.compliance_upcoming(data)
+        self.assertEqual(len(result), 0)
+
+    def test_overdue_marked(self):
+        from datetime import date, timedelta
+        due = (date.today() - timedelta(days=5)).isoformat()
+        data = {"deadlines": [
+            {"id": "test-1", "title": "Test deadline", "due_date": due,
+             "frequency": "annual", "category": "hmrc", "status": "upcoming"},
+        ]}
+        result = datalib.compliance_upcoming(data)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["status"], "overdue")
 
 
 # ---------------------------------------------------------------------------
@@ -479,28 +424,6 @@ class TestValidateRefs(unittest.TestCase):
         errors = datalib.validate_refs("accounts", data)
         self.assertTrue(any("expenses:unknown" in e for e in errors))
 
-    def test_clean_crm_data(self):
-        data = {
-            "customers": [{"id": "acme", "company": "Acme Corp"}],
-            "contacts": [{"id": "acme-jane", "customer_id": "acme", "name": "Jane"}],
-            "contracts": [{"id": "ct-acme-1", "customer_id": "acme", "title": "SaaS"}],
-            "contract_lines": [{"contract_id": "ct-acme-1", "seq": 1, "description": "Licence",
-                                "quantity": 1, "unit_price": 100, "frequency": "monthly"}],
-            "contract_clauses": [{"contract_id": "ct-acme-1", "seq": 1, "heading": "Terms", "body": "..."}],
-        }
-        self.assertEqual(datalib.validate_refs("crm", data), [])
-
-    def test_orphan_customer_in_contracts(self):
-        data = {
-            "customers": [],
-            "contacts": [],
-            "contracts": [{"id": "ct-1", "customer_id": "ghost", "title": "SaaS"}],
-            "contract_lines": [],
-            "contract_clauses": [],
-        }
-        errors = datalib.validate_refs("crm", data)
-        self.assertTrue(any("ghost" in e for e in errors))
-
     def test_clean_board_data(self):
         data = {
             "board_meetings": [{"id": "bm-2026-01-01", "meeting_date": "2026-01-01", "title": "Q1"}],
@@ -523,6 +446,61 @@ class TestValidateRefs(unittest.TestCase):
 
     def test_unknown_domain_returns_empty(self):
         self.assertEqual(datalib.validate_refs("unknown", {}), [])
+
+
+# ---------------------------------------------------------------------------
+# lint()
+# ---------------------------------------------------------------------------
+
+class TestLint(unittest.TestCase):
+    def test_clean_shares_data(self):
+        data = {
+            "share_classes": [{"name": "ordinary", "nominal_value": 0.01,
+                               "nominal_currency": "GBP", "authorised": 10000}],
+            "holders": [{"id": "alice", "display_name": "Alice"}],
+            "share_events": [
+                {"event_date": "2024-01-01", "event_type": "grant",
+                 "holder_id": "alice", "share_class": "ordinary", "quantity": 100},
+            ],
+            "pools": [{"name": "founder", "share_class": "ordinary", "budget": 8000}],
+            "pool_members": [{"pool_name": "founder", "holder_id": "alice"}],
+        }
+        self.assertEqual(datalib.lint("shares", data), [])
+
+    def test_missing_required_field(self):
+        data = {
+            "holders": [{"id": "alice"}],  # missing display_name
+        }
+        errors = datalib.lint("shares", data)
+        self.assertTrue(any("display_name" in e for e in errors))
+
+    def test_wrong_type(self):
+        data = {
+            "share_classes": [{"name": "ordinary", "nominal_value": 0.01,
+                               "nominal_currency": "GBP", "authorised": "ten thousand"}],
+        }
+        errors = datalib.lint("shares", data)
+        self.assertTrue(any("authorised" in e for e in errors))
+
+    def test_invalid_enum(self):
+        data = {
+            "share_events": [
+                {"event_date": "2024-01-01", "event_type": "steal",
+                 "holder_id": "alice", "share_class": "ordinary", "quantity": 100},
+            ],
+        }
+        errors = datalib.lint("shares", data)
+        self.assertTrue(any("steal" in e for e in errors))
+
+    def test_invalid_account_type(self):
+        data = {
+            "accounts": [{"path": "misc:stuff", "account_type": "magic"}],
+        }
+        errors = datalib.lint("accounts", data)
+        self.assertTrue(any("magic" in e for e in errors))
+
+    def test_unknown_domain_no_errors(self):
+        self.assertEqual(datalib.lint("unknown", {"foo": [{"a": 1}]}), [])
 
 
 # ---------------------------------------------------------------------------

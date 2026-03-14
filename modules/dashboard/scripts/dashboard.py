@@ -70,7 +70,8 @@ def page(title, body, nav_active=""):
         ("index.html", "Overview"),
         ("cap-table.html", "Cap Table"),
         ("accounts.html", "Accounts"),
-        ("crm.html", "CRM"),
+        ("officers.html", "Officers"),
+        ("compliance.html", "Compliance"),
     ]
     nav_html = []
     for href, label in nav_items:
@@ -230,7 +231,8 @@ footer {{
 def build_index():
     shares_data = datalib.load("shares")
     acct_data = datalib.load("accounts")
-    crm_data = datalib.load("crm")
+    officers_data = datalib.load("officers")
+    comp_data = datalib.load("compliance")
 
     # Shares metrics
     h = datalib.holdings(shares_data)
@@ -238,15 +240,13 @@ def build_index():
     holders = len(holder_ids)
     shares_issued = sum(r["shares_held"] for r in h)
 
-    # CRM metrics
-    customers = len(crm_data.get("customers", []))
-    contracts = len(crm_data.get("contracts", []))
-    contacts = len(crm_data.get("contacts", []))
+    # Officers metrics
+    officers = [o for o in officers_data.get("officers", []) if not o.get("resigned_date")]
+    num_officers = len(officers)
 
-    # MRR from active contracts
-    summaries = datalib.contract_summary(crm_data)
-    mrr = sum(s["mrr"] for s in summaries if s["status"] == "active")
-    mrr = round(mrr, 2)
+    # Compliance metrics
+    upcoming = datalib.compliance_upcoming(comp_data)
+    num_upcoming = len(upcoming)
 
     # Accounts metrics
     num_accounts = len(acct_data.get("accounts", []))
@@ -257,30 +257,37 @@ def build_index():
 <div class="cards">
   <div class="card"><div class="label">Shareholders</div><div class="value">{esc(holders)}</div></div>
   <div class="card"><div class="label">Shares Issued</div><div class="value">{esc(shares_issued)}</div></div>
-  <div class="card"><div class="label">Customers</div><div class="value">{esc(customers)}</div></div>
-  <div class="card"><div class="label">Monthly Revenue</div><div class="value">&pound;{esc(mrr)}</div></div>
-  <div class="card"><div class="label">Contracts</div><div class="value">{esc(contracts)}</div></div>
-  <div class="card"><div class="label">Contacts</div><div class="value">{esc(contacts)}</div></div>
+  <div class="card"><div class="label">Officers</div><div class="value">{esc(num_officers)}</div></div>
+  <div class="card"><div class="label">Compliance Due</div><div class="value">{esc(num_upcoming)}</div></div>
   <div class="card"><div class="label">Accounts</div><div class="value">{esc(num_accounts)}</div></div>
   <div class="card"><div class="label">Transactions</div><div class="value">{esc(num_txns)}</div></div>
 </div>
 """
 
-    renewals = datalib.renewals_due(crm_data)
-    renewals_display = [
+    upcoming_display = [
         {
-            "company": r["company"],
-            "title": r["title"],
-            "status": r["status"],
-            "auto_renew": r["auto_renew"],
-            "expiry_date": r["expiry_date"],
-            "days_left": r["days_left"],
+            "title": d["title"],
+            "due_date": d["due_date"],
+            "category": d["category"],
+            "status": d["status"],
+            "days_left": d["days_left"],
         }
-        for r in renewals[:5]
+        for d in upcoming[:5]
     ]
 
+    # Recent changes
+    changes = []
+    for domain in ["shares", "accounts", "officers", "compliance", "board"]:
+        changes.extend(
+            {**c, "domain": domain} for c in datalib.changelog(domain)[:5]
+        )
+    changes.sort(key=lambda c: c["date"], reverse=True)
+    changes = changes[:10]
+
     body = cards
-    body += "<h2>Upcoming Renewals</h2>\n" + html_table(renewals_display)
+    body += "<h2>Upcoming Compliance Deadlines</h2>\n" + html_table(upcoming_display)
+    if changes:
+        body += "<h2>Recent Changes</h2>\n" + html_table(changes)
     return page("Overview", body, "index")
 
 
@@ -376,56 +383,65 @@ def build_accounts():
     return page("Accounts", body, "accounts")
 
 
-def build_crm():
-    crm_data = datalib.load("crm")
+def build_officers():
+    data = datalib.load("officers")
+    officers = data.get("officers", [])
 
-    # Contract overview
-    summaries = datalib.contract_summary(crm_data)
-    overview_display = [
+    current = [
         {
-            "company": s["company"],
-            "title": s["title"],
-            "status": s["status"],
-            "mrr": s["mrr"],
-            "effective_date": s["effective_date"],
-            "term_months": s["term_months"],
-            "auto_renew": s["auto_renew"],
-            "line_count": s["line_count"],
+            "name": o["person_name"],
+            "role": o["role"],
+            "appointed": o.get("appointed_date", ""),
         }
-        for s in summaries
+        for o in officers if not o.get("resigned_date")
+    ]
+    former = [
+        {
+            "name": o["person_name"],
+            "role": o["role"],
+            "appointed": o.get("appointed_date", ""),
+            "resigned": o.get("resigned_date", ""),
+        }
+        for o in officers if o.get("resigned_date")
     ]
 
-    # Contacts
-    contacts_raw = crm_data.get("contacts", [])
-    customers_map = {c["id"]: c["company"] for c in crm_data.get("customers", [])}
-    contacts_display = [
+    body = '<p class="subtitle">Company officers — directors, secretary, and PSC</p>'
+    body += "<h2>Current Officers</h2>\n" + html_table(current)
+    if former:
+        body += "<h2>Former Officers</h2>\n" + html_table(former)
+    return page("Officers", body, "officers")
+
+
+def build_compliance():
+    data = datalib.load("compliance")
+    upcoming = datalib.compliance_upcoming(data)
+
+    upcoming_display = [
         {
-            "company": customers_map.get(c.get("customer_id", ""), c.get("customer_id", "")),
-            "name": c.get("name", ""),
-            "role": c.get("role", ""),
-            "email": c.get("email", ""),
+            "title": d["title"],
+            "due_date": d["due_date"],
+            "category": d["category"],
+            "status": d["status"],
+            "days_left": d["days_left"],
         }
-        for c in sorted(contacts_raw, key=lambda c: (customers_map.get(c.get("customer_id", ""), ""), c.get("name", "")))
+        for d in upcoming
     ]
 
-    # Renewals
-    renewals = datalib.renewals_due(crm_data)
-    renewals_display = [
+    all_deadlines = [
         {
-            "company": r["company"],
-            "title": r["title"],
-            "auto_renew": r["auto_renew"],
-            "expiry_date": r["expiry_date"],
-            "days_left": r["days_left"],
+            "title": d["title"],
+            "due_date": d["due_date"],
+            "frequency": d["frequency"],
+            "category": d["category"],
+            "status": d.get("status", "upcoming"),
         }
-        for r in renewals
+        for d in data.get("deadlines", [])
     ]
 
-    body = '<p class="subtitle">Customers, contracts, contacts, and renewals</p>'
-    body += "<h2>Contracts</h2>\n" + html_table(overview_display)
-    body += "<h2>Contacts</h2>\n" + html_table(contacts_display)
-    body += "<h2>Upcoming Renewals</h2>\n" + html_table(renewals_display)
-    return page("CRM", body, "crm")
+    body = '<p class="subtitle">Statutory compliance deadlines and filing calendar</p>'
+    body += "<h2>Upcoming (90 days)</h2>\n" + html_table(upcoming_display)
+    body += "<h2>All Deadlines</h2>\n" + html_table(all_deadlines)
+    return page("Compliance", body, "compliance")
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +456,8 @@ def cmd_build(args):
         "index.html": build_index,
         "cap-table.html": build_cap_table,
         "accounts.html": build_accounts,
-        "crm.html": build_crm,
+        "officers.html": build_officers,
+        "compliance.html": build_compliance,
     }
 
     for filename, builder in pages.items():

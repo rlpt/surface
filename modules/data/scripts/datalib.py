@@ -1,15 +1,18 @@
-"""datalib — shared CSV data layer for surface modules."""
+"""datalib — shared YAML data layer for surface modules."""
 
-import csv
-import io
 import os
 import subprocess
 import sys
 from collections import defaultdict
 from datetime import date, timedelta
 
+import yaml
+
 SURFACE_ROOT = os.environ.get("SURFACE_ROOT", ".")
 DATA_DIR = os.path.join(SURFACE_ROOT, "data")
+DOWNLOADS_DIR = os.path.join(SURFACE_ROOT, "downloads")
+LETTERHEAD_TEMPLATE = os.path.join(SURFACE_ROOT, "modules", "brand", "letterhead.typ")
+LOGO_PATH = os.path.join(SURFACE_ROOT, "modules", "brand", "logo.svg")
 
 
 def die(msg):
@@ -22,41 +25,37 @@ def die(msg):
 # ---------------------------------------------------------------------------
 
 def load(domain):
-    """Load all CSV files from data/<domain>/, returning a dict of lists."""
-    domain_dir = os.path.join(DATA_DIR, domain)
-    if not os.path.isdir(domain_dir):
+    """Load data from data/<domain>.yaml, returning a dict of lists."""
+    path = os.path.join(DATA_DIR, f"{domain}.yaml")
+    if not os.path.exists(path):
         return {}
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        return {}
+    # Normalise: convert date objects to ISO strings for consistency
     result = {}
-    for fname in sorted(os.listdir(domain_dir)):
-        if not fname.endswith(".csv"):
+    for key, rows in data.items():
+        if not isinstance(rows, list):
+            result[key] = rows
             continue
-        table_name = fname[:-4]
-        path = os.path.join(domain_dir, fname)
-        with open(path, newline="") as f:
-            reader = csv.DictReader(f)
-            result[table_name] = [_coerce_types(row) for row in reader]
+        result[key] = [_normalise_row(row) for row in rows]
     return result
 
 
 def save(domain, data):
-    """Write data dict back to CSV files in data/<domain>/."""
-    domain_dir = os.path.join(DATA_DIR, domain)
-    os.makedirs(domain_dir, exist_ok=True)
-    for table_name, rows in data.items():
-        if not isinstance(rows, list):
-            continue
-        path = os.path.join(domain_dir, f"{table_name}.csv")
-        if not rows:
-            # Remove empty table files
-            if os.path.exists(path):
-                os.remove(path)
-            continue
-        fieldnames = list(rows[0].keys())
-        with open(path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in rows:
-                writer.writerow({k: _csv_val(v) for k, v in row.items()})
+    """Write data dict to data/<domain>.yaml."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    path = os.path.join(DATA_DIR, f"{domain}.yaml")
+    # Prepare data for YAML output
+    out = {}
+    for key, rows in data.items():
+        if isinstance(rows, list):
+            out[key] = [_prepare_row(row) for row in rows]
+        else:
+            out[key] = rows
+    with open(path, "w") as f:
+        yaml.dump(out, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 def git_commit(msg):
@@ -66,47 +65,199 @@ def git_commit(msg):
 
 
 # ---------------------------------------------------------------------------
-# CSV type helpers
+# Type helpers
 # ---------------------------------------------------------------------------
 
-def _coerce_types(row):
-    """Infer Python types from CSV string values."""
+def _normalise_row(row):
+    """Normalise a YAML-loaded row: convert date objects to ISO strings."""
+    if not isinstance(row, dict):
+        return row
     out = {}
     for k, v in row.items():
-        if v == "":
-            out[k] = ""
-            continue
-        if v == "true":
-            out[k] = True
-            continue
-        if v == "false":
-            out[k] = False
-            continue
-        try:
-            iv = int(v)
-            # Only promote if the string round-trips exactly (preserves "007" as string)
-            if str(iv) == v:
-                out[k] = iv
-                continue
-        except ValueError:
-            pass
-        # Only try float if it contains a decimal point (avoids "007" → 7.0)
-        if "." in v:
-            try:
-                fv = float(v)
-                out[k] = fv
-                continue
-            except ValueError:
-                pass
-        out[k] = v
+        if isinstance(v, date) and not isinstance(v, type(None)):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
     return out
 
 
-def _csv_val(v):
-    """Convert a Python value to a CSV-safe string."""
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    return v
+def _prepare_row(row):
+    """Prepare a row for YAML output: convert ISO date strings back to date objects."""
+    if not isinstance(row, dict):
+        return row
+    out = {}
+    for k, v in row.items():
+        if isinstance(v, str) and _is_date_key(k):
+            try:
+                out[k] = date.fromisoformat(v)
+            except ValueError:
+                out[k] = v
+        else:
+            out[k] = v
+    return out
+
+
+_DATE_SUFFIXES = ("_date", "_start", "_at")
+_DATE_NAMES = ("effective_date", "event_date", "meeting_date", "txn_date",
+               "voted_date", "vesting_start", "appointed_date", "resigned_date",
+               "filed_date", "due_date")
+
+
+def _is_date_key(key):
+    """Heuristic: does this key name suggest a date value?"""
+    return key in _DATE_NAMES or any(key.endswith(s) for s in _DATE_SUFFIXES)
+
+
+# ---------------------------------------------------------------------------
+# Schema definitions (for linting)
+# ---------------------------------------------------------------------------
+
+SCHEMAS = {
+    "shares": {
+        "share_classes": {
+            "required": ["name", "nominal_value", "nominal_currency", "authorised"],
+            "types": {"name": str, "nominal_value": (int, float), "nominal_currency": str, "authorised": int},
+            "values": {},
+        },
+        "holders": {
+            "required": ["id", "display_name"],
+            "types": {"id": str, "display_name": str},
+            "values": {},
+        },
+        "share_events": {
+            "required": ["event_date", "event_type", "holder_id", "share_class", "quantity"],
+            "types": {"event_date": str, "event_type": str, "holder_id": str,
+                       "share_class": str, "quantity": int,
+                       "vesting_start": str, "vesting_months": int, "cliff_months": int},
+            "values": {"event_type": ["grant", "transfer-in", "transfer-out", "cancel"]},
+        },
+        "pools": {
+            "required": ["name", "share_class", "budget"],
+            "types": {"name": str, "share_class": str, "budget": int},
+            "values": {},
+        },
+        "pool_members": {
+            "required": ["pool_name", "holder_id"],
+            "types": {"pool_name": str, "holder_id": str},
+            "values": {},
+        },
+    },
+    "accounts": {
+        "accounts": {
+            "required": ["path", "account_type"],
+            "types": {"path": str, "account_type": str},
+            "values": {"account_type": ["assets", "liabilities", "expenses", "revenue", "equity"]},
+        },
+        "transactions": {
+            "required": ["id", "txn_date", "payee"],
+            "types": {"id": (int, str), "txn_date": str, "payee": str},
+            "values": {},
+        },
+        "postings": {
+            "required": ["txn_id", "account_path", "amount"],
+            "types": {"txn_id": (int, str), "account_path": str, "amount": (int, float)},
+            "values": {},
+        },
+    },
+    "officers": {
+        "officers": {
+            "required": ["id", "person_name", "role", "appointed_date"],
+            "types": {"id": str, "person_name": str, "role": str, "appointed_date": str},
+            "values": {"role": ["director", "secretary", "psc"]},
+        },
+    },
+    "compliance": {
+        "deadlines": {
+            "required": ["id", "title", "due_date", "frequency", "category", "status"],
+            "types": {"id": str, "title": str, "due_date": str, "frequency": str,
+                       "category": str, "status": str},
+            "values": {
+                "frequency": ["annual", "quarterly", "monthly", "one-off"],
+                "category": ["companies-house", "hmrc", "other"],
+                "status": ["upcoming", "filed", "overdue"],
+            },
+        },
+    },
+    "board": {
+        "board_meetings": {
+            "required": ["id", "meeting_date", "title"],
+            "types": {"id": str, "meeting_date": str, "title": str},
+            "values": {"status": ["scheduled", "in-progress", "completed", "cancelled"]},
+        },
+        "board_attendees": {
+            "required": ["meeting_id", "person_name"],
+            "types": {"meeting_id": str, "person_name": str},
+            "values": {"role": ["chair", "secretary", "director", "observer"]},
+        },
+        "board_minutes": {
+            "required": ["meeting_id", "seq", "item_text"],
+            "types": {"meeting_id": str, "seq": int, "item_text": str},
+            "values": {},
+        },
+        "board_resolutions": {
+            "required": ["id", "meeting_id", "resolution_text"],
+            "types": {"id": str, "meeting_id": str, "resolution_text": str},
+            "values": {"status": ["pending", "passed", "failed", "withdrawn"]},
+        },
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Linting
+# ---------------------------------------------------------------------------
+
+def lint(domain, data):
+    """Validate data against schema. Returns list of error strings."""
+    errors = []
+    schema = SCHEMAS.get(domain, {})
+
+    for table_name, table_schema in schema.items():
+        rows = data.get(table_name, [])
+        if not isinstance(rows, list):
+            continue
+        required = table_schema.get("required", [])
+        types = table_schema.get("types", {})
+        values = table_schema.get("values", {})
+
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                errors.append(f"{table_name}[{i}]: expected a mapping, got {type(row).__name__}")
+                continue
+
+            # Required fields
+            for field in required:
+                if field not in row or row[field] is None or row[field] == "":
+                    errors.append(f"{table_name}[{i}]: missing required field '{field}'")
+
+            # Type checks
+            for field, expected_type in types.items():
+                val = row.get(field)
+                if val is None or val == "":
+                    continue
+                if not isinstance(val, expected_type):
+                    errors.append(
+                        f"{table_name}[{i}]: field '{field}' expected "
+                        f"{_type_name(expected_type)}, got {type(val).__name__} ({val!r})"
+                    )
+
+            # Enum value checks
+            for field, allowed in values.items():
+                val = row.get(field)
+                if val is not None and val != "" and val not in allowed:
+                    errors.append(
+                        f"{table_name}[{i}]: field '{field}' value '{val}' "
+                        f"not in {allowed}"
+                    )
+
+    return errors
+
+
+def _type_name(t):
+    """Human-readable type name."""
+    if isinstance(t, tuple):
+        return "/".join(x.__name__ for x in t)
+    return t.__name__
 
 
 # ---------------------------------------------------------------------------
@@ -213,97 +364,135 @@ def account_balances(acct_data=None):
     return result
 
 
-def contract_summary(crm_data=None):
-    """Compute contract summary with MRR.
+def vesting_schedule(share_data=None):
+    """Compute vesting status per holder.
 
-    Returns list of dicts with: id, company, title, status, effective_date,
-    term_months, auto_renew, currency, mrr, line_count, clause_count
+    Returns list of dicts: holder_id, share_class, total_granted, vested,
+    unvested, cliff_date, fully_vested_date, next_vest_date, pct_vested
     """
-    if crm_data is None:
-        crm_data = load("crm")
-    customers_map = {
-        c["id"]: c["company"] for c in crm_data.get("customers", [])
-    }
-    lines_by_contract = defaultdict(list)
-    for ln in crm_data.get("contract_lines", []):
-        lines_by_contract[ln["contract_id"]].append(ln)
-    clauses_by_contract = defaultdict(list)
-    for cl in crm_data.get("contract_clauses", []):
-        clauses_by_contract[cl["contract_id"]].append(cl)
-
+    if share_data is None:
+        share_data = load("shares")
+    today = date.today()
     result = []
-    for ct in crm_data.get("contracts", []):
-        lines = lines_by_contract.get(ct["id"], [])
-        clauses = clauses_by_contract.get(ct["id"], [])
-        mrr = 0.0
-        for ln in lines:
-            qty = float(ln.get("quantity", 1))
-            price = float(ln["unit_price"])
-            freq = ln.get("frequency", "monthly")
-            if freq == "monthly":
-                mrr += qty * price
-            elif freq == "quarterly":
-                mrr += qty * price / 3
-            elif freq == "annual":
-                mrr += qty * price / 12
+    for e in share_data.get("share_events", []):
+        if e["event_type"] != "grant":
+            continue
+        vs = e.get("vesting_start")
+        vm = e.get("vesting_months")
+        cm = e.get("cliff_months", 0)
+        qty = e["quantity"]
+        hid = e["holder_id"]
+        cls = e["share_class"]
+
+        if not vs or not vm:
+            # Fully vested immediately
+            result.append({
+                "holder_id": hid, "share_class": cls,
+                "total_granted": qty, "vested": qty, "unvested": 0,
+                "cliff_date": "", "fully_vested_date": "",
+                "next_vest_date": "", "pct_vested": 100.0,
+            })
+            continue
+
+        start = date.fromisoformat(str(vs))
+        cliff_date = _add_months(start, cm) if cm else start
+        fully_vested_date = _add_months(start, vm)
+        months_elapsed = _months_between(start, today)
+
+        if today < cliff_date:
+            vested = 0
+        elif today >= fully_vested_date:
+            vested = qty
+        else:
+            vested = int(qty * months_elapsed / vm)
+
+        unvested = qty - vested
+        pct = round(vested * 100.0 / qty, 1) if qty > 0 else 0.0
+
+        # Next vest date: next month boundary after today
+        if vested < qty and today >= cliff_date:
+            next_vest = _add_months(start, months_elapsed + 1)
+        elif today < cliff_date:
+            next_vest = cliff_date
+        else:
+            next_vest = None
+
         result.append({
-            "id": ct["id"],
-            "company": customers_map.get(ct["customer_id"], ct["customer_id"]),
-            "title": ct["title"],
-            "status": ct.get("status", "draft"),
-            "effective_date": ct.get("effective_date", ""),
-            "term_months": ct.get("term_months", ""),
-            "auto_renew": ct.get("auto_renew", False),
-            "currency": ct.get("currency", "GBP"),
-            "mrr": round(mrr, 2),
-            "line_count": len(lines),
-            "clause_count": len(clauses),
+            "holder_id": hid, "share_class": cls,
+            "total_granted": qty, "vested": vested, "unvested": unvested,
+            "cliff_date": cliff_date.isoformat(),
+            "fully_vested_date": fully_vested_date.isoformat(),
+            "next_vest_date": next_vest.isoformat() if next_vest else "",
+            "pct_vested": pct,
         })
     return result
 
 
-def renewals_due(crm_data=None):
-    """Compute active contracts expiring within 90 days.
+def compliance_upcoming(comp_data=None):
+    """Deadlines due within 90 days.
 
-    Returns list of dicts: id, company, title, status, auto_renew, expiry_date, days_left
+    Returns list of dicts: id, title, due_date, frequency, category, status, days_left
     """
-    if crm_data is None:
-        crm_data = load("crm")
-    customers_map = {
-        c["id"]: c["company"] for c in crm_data.get("customers", [])
-    }
+    if comp_data is None:
+        comp_data = load("compliance")
     today = date.today()
     cutoff = today + timedelta(days=90)
     result = []
-    for ct in crm_data.get("contracts", []):
-        if ct.get("status") != "active":
-            continue
-        term = ct.get("term_months")
-        eff = ct.get("effective_date")
-        if not term or not eff:
-            continue
+    for d in comp_data.get("deadlines", []):
         try:
-            eff_date = date.fromisoformat(str(eff))
-            term_months = int(term)
+            due = date.fromisoformat(str(d["due_date"]))
         except (ValueError, TypeError):
             continue
-        # Approximate month addition
-        expiry_year = eff_date.year + (eff_date.month + term_months - 1) // 12
-        expiry_month = (eff_date.month + term_months - 1) % 12 + 1
-        expiry_day = min(eff_date.day, 28)
-        expiry = date(expiry_year, expiry_month, expiry_day)
-        if expiry <= cutoff:
+        if due <= cutoff and d.get("status") != "filed":
             result.append({
-                "id": ct["id"],
-                "company": customers_map.get(ct["customer_id"], ct["customer_id"]),
-                "title": ct["title"],
-                "status": ct["status"],
-                "auto_renew": ct.get("auto_renew", False),
-                "expiry_date": expiry.isoformat(),
-                "days_left": (expiry - today).days,
+                "id": d["id"],
+                "title": d["title"],
+                "due_date": d["due_date"],
+                "frequency": d["frequency"],
+                "category": d["category"],
+                "status": "overdue" if due < today else d.get("status", "upcoming"),
+                "days_left": (due - today).days,
             })
-    result.sort(key=lambda x: x["expiry_date"])
+    result.sort(key=lambda x: x["due_date"])
     return result
+
+
+def changelog(domain, since=None):
+    """Parse git log for data/<domain>.yaml, return structured list of changes."""
+    cmd = ["git", "log", "--pretty=format:%H|%ai|%s", "--follow"]
+    if since:
+        cmd.append(f"--since={since}")
+    cmd.extend(["--", f"data/{domain}.yaml"])
+    try:
+        out = subprocess.run(cmd, cwd=SURFACE_ROOT, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError:
+        return []
+    result = []
+    for line in out.stdout.strip().split("\n"):
+        if not line:
+            continue
+        parts = line.split("|", 2)
+        if len(parts) == 3:
+            result.append({
+                "commit": parts[0][:8],
+                "date": parts[1].split(" ")[0],
+                "message": parts[2],
+            })
+    return result
+
+
+def _add_months(d, months):
+    """Add months to a date."""
+    month = d.month - 1 + months
+    year = d.year + month // 12
+    month = month % 12 + 1
+    day = min(d.day, 28)
+    return date(year, month, day)
+
+
+def _months_between(start, end):
+    """Approximate months between two dates."""
+    return (end.year - start.year) * 12 + end.month - start.month
 
 
 # ---------------------------------------------------------------------------
@@ -336,14 +525,6 @@ def validate_refs(domain, data):
         _check(data.get("postings", []), "account_path", account_paths, "postings")
         _check(data.get("postings", []), "txn_id", txn_ids, "postings")
 
-    elif domain == "crm":
-        customer_ids = {c["id"] for c in data.get("customers", [])}
-        contract_ids = {c["id"] for c in data.get("contracts", [])}
-        _check(data.get("contacts", []), "customer_id", customer_ids, "contacts")
-        _check(data.get("contracts", []), "customer_id", customer_ids, "contracts")
-        _check(data.get("contract_lines", []), "contract_id", contract_ids, "contract_lines")
-        _check(data.get("contract_clauses", []), "contract_id", contract_ids, "contract_clauses")
-
     elif domain == "board":
         meeting_ids = {m["id"] for m in data.get("board_meetings", [])}
         _check(data.get("board_attendees", []), "meeting_id", meeting_ids, "board_attendees")
@@ -374,3 +555,87 @@ def print_table(rows, columns=None):
     for row in rows:
         line = "  ".join(str(row.get(col, "")).ljust(widths[col]) for col in columns)
         print(line)
+
+
+# ---------------------------------------------------------------------------
+# Branded PDF generation
+# ---------------------------------------------------------------------------
+
+def generate_branded_pdf(output_file, markdown):
+    """Generate a PDF with Formabi letterhead via pandoc + typst template.
+
+    Takes markdown content, converts to typst via pandoc, wraps in the
+    letterhead template, and compiles to PDF.
+    """
+    import tempfile
+
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+
+    root = os.path.abspath(SURFACE_ROOT)
+    logo = os.path.join(root, "modules", "brand", "logo.svg")
+    template_abs = os.path.join(root, "modules", "brand", "letterhead.typ")
+
+    # Paths relative to SURFACE_ROOT for typst
+    template_rel = "modules/brand/letterhead.typ"
+    logo_rel = "modules/brand/logo.svg"
+
+    if not os.path.exists(template_abs):
+        # Fallback: plain pandoc PDF without letterhead
+        subprocess.run(
+            [
+                "pandoc",
+                "--pdf-engine=typst",
+                "-V", "mainfont=Helvetica",
+                "-V", "margin-top=2cm",
+                "-V", "margin-bottom=2cm",
+                "-V", "margin-left=2cm",
+                "-V", "margin-right=2cm",
+                "-o", output_file,
+            ],
+            input=markdown,
+            text=True,
+            check=True,
+        )
+        print(output_file)
+        return
+
+    # Step 1: Convert markdown to typst markup via pandoc
+    result = subprocess.run(
+        ["pandoc", "-f", "markdown", "-t", "typst"],
+        input=markdown,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    typst_body = result.stdout
+
+    # Step 2: Build a typst document that imports the template
+    # Logo path relative to the template file (both in modules/brand/)
+    logo_line = '  logo-path: "logo.svg",' if os.path.exists(logo) else ""
+    typst_doc = f"""\
+#import "{template_rel}": letterhead
+
+#show: letterhead.with(
+{logo_line}
+)
+
+{typst_body}
+"""
+
+    # Step 3: Write to temp file in SURFACE_ROOT and compile with --root
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".typ", dir=root, delete=False
+    ) as tmp:
+        tmp.write(typst_doc)
+        tmp_path = tmp.name
+
+    try:
+        subprocess.run(
+            ["typst", "compile", "--root", root, tmp_path, output_file],
+            cwd=root,
+            check=True,
+        )
+    finally:
+        os.unlink(tmp_path)
+
+    print(output_file)

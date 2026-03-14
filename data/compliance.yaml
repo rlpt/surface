@@ -1,0 +1,25 @@
+deadlines:
+  - id: confirmation-statement-2026
+    title: Annual confirmation statement
+    due_date: 2026-06-15
+    frequency: annual
+    category: companies-house
+    status: upcoming
+  - id: annual-accounts-2026
+    title: Annual accounts filing
+    due_date: 2026-03-15
+    frequency: annual
+    category: companies-house
+    status: upcoming
+  - id: corp-tax-2026
+    title: Corporation tax return
+    due_date: 2026-03-15
+    frequency: annual
+    category: hmrc
+    status: upcoming
+  - id: vat-q1-2026
+    title: VAT return Q1 2026
+    due_date: 2026-05-07
+    frequency: quarterly
+    category: hmrc
+    status: upcoming

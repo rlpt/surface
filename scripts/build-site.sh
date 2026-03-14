@@ -28,17 +28,6 @@ mkdir -p "$SURFACE_ROOT/downloads"
 # Board PDFs
 python3 "$SURFACE_ROOT/modules/board/scripts/board.py" pdf pack || echo "    (no board data for PDF)"
 
-# Contract PDFs — generate for all contracts
-CONTRACTS=$(SURFACE_ROOT="$SURFACE_ROOT" python3 -c "
-import sys; sys.path.insert(0, '$SURFACE_ROOT/modules/data/scripts')
-import datalib
-for ct in datalib.load('crm').get('contracts', []):
-    print(ct['id'])
-" 2>/dev/null) || true
-for ct in $CONTRACTS; do
-  python3 "$SURFACE_ROOT/modules/crm/scripts/crm.py" pdf "$ct" || echo "    (skipped $ct)"
-done
-
 # Shares PDFs
 python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" pdf table || echo "    (no shares data for PDF)"
 

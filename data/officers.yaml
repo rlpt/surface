@@ -1,0 +1,13 @@
+officers:
+  - id: richard
+    person_name: Richard Targett
+    role: director
+    appointed_date: 2025-06-15
+  - id: mark
+    person_name: Mark Holland
+    role: secretary
+    appointed_date: 2025-06-15
+  - id: emma
+    person_name: Emma Loxley
+    role: director
+    appointed_date: 2025-12-10

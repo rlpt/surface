@@ -9,53 +9,101 @@ die() { echo "error: $1" >&2; exit 1; }
 cmd_status() {
   echo "Data directory: $DATA_DIR"
   echo ""
-  for d in "$DATA_DIR"/*/; do
-    [ -d "$d" ] || continue
-    domain=$(basename "$d")
-    echo "  $domain/"
-    for f in "$d"*.csv; do
-      [ -f "$f" ] || continue
-      name=$(basename "$f" .csv)
-      # Count data rows (subtract 1 for header)
-      total=$(wc -l < "$f" | tr -d ' ')
-      rows=$((total - 1))
-      echo "    $name.csv  ($rows rows)"
-    done
+  for f in "$DATA_DIR"/*.yaml; do
+    [ -f "$f" ] || continue
+    domain=$(basename "$f" .yaml)
+    # Count top-level keys and their list lengths
+    echo "  $domain.yaml"
+    python3 -c "
+import yaml, sys
+with open('$f') as fh:
+    data = yaml.safe_load(fh) or {}
+for key, val in data.items():
+    if isinstance(val, list):
+        print(f'    {key}: {len(val)} entries')
+    else:
+        print(f'    {key}: (scalar)')
+"
   done
 }
 
 cmd_check() {
-  echo "Running module checks..."
-  local errors=0
-  python3 "$SURFACE_ROOT/modules/shares/scripts/shares.py" check || errors=$((errors + 1))
-  python3 "$SURFACE_ROOT/modules/accounts/scripts/accounts.py" check || errors=$((errors + 1))
-  echo ""
-  echo "Running referential integrity checks..."
+  echo "Running data checks..."
   python3 -c "
 import sys, os
 sys.path.insert(0, os.path.join('$SURFACE_ROOT', 'modules', 'data', 'scripts'))
 import datalib
+
 all_errors = []
-for domain in ['shares', 'accounts', 'crm', 'board']:
+for domain in ['shares', 'accounts', 'officers', 'compliance', 'board']:
     data = datalib.load(domain)
+
+    # Schema lint
+    errs = datalib.lint(domain, data)
+    for e in errs:
+        all_errors.append(f'  {domain} lint: {e}')
+
+    # Referential integrity
     errs = datalib.validate_refs(domain, data)
     for e in errs:
-        all_errors.append(f'  {domain}: {e}')
+        all_errors.append(f'  {domain} refs: {e}')
+
 if all_errors:
-    print('referential integrity errors:')
+    print('data errors:', file=sys.stderr)
     for e in all_errors:
-        print(e)
+        print(e, file=sys.stderr)
     sys.exit(1)
 else:
-    print('OK — all references valid')
-" || errors=$((errors + 1))
-  if [ "$errors" -gt 0 ]; then
-    echo ""
-    echo "$errors check(s) reported errors"
-    exit 1
+    print('OK — all data valid')
+"
+}
+
+cmd_lint() {
+  echo "Linting data..."
+  python3 -c "
+import sys, os
+sys.path.insert(0, os.path.join('$SURFACE_ROOT', 'modules', 'data', 'scripts'))
+import datalib
+
+all_errors = []
+for domain in ['shares', 'accounts', 'officers', 'compliance', 'board']:
+    data = datalib.load(domain)
+    errs = datalib.lint(domain, data)
+    for e in errs:
+        all_errors.append(f'  {domain}: {e}')
+
+if all_errors:
+    print('lint errors:', file=sys.stderr)
+    for e in all_errors:
+        print(e, file=sys.stderr)
+    sys.exit(1)
+else:
+    print('OK — all data passes lint')
+"
+}
+
+cmd_changelog() {
+  local domain="${1:-}"
+  local since="${2:-}"
+  if [ -z "$domain" ]; then
+    die "usage: data changelog <domain> [--since date]"
   fi
-  echo ""
-  echo "All checks passed"
+  local since_arg=""
+  if [ -n "$since" ]; then
+    since_arg="$since"
+  fi
+  python3 -c "
+import sys, os
+sys.path.insert(0, os.path.join('$SURFACE_ROOT', 'modules', 'data', 'scripts'))
+import datalib
+since = '$since_arg' if '$since_arg' else None
+entries = datalib.changelog('$domain', since)
+if not entries:
+    print('No changes found.')
+else:
+    for e in entries:
+        print(f\"{e['commit']}  {e['date']}  {e['message']}\")
+"
 }
 
 cmd_edit() {
@@ -71,26 +119,30 @@ cmd_diff() {
 }
 
 cmd_help() {
-  echo "data — surface company data (TOML files in data/)"
+  echo "data — surface company data (YAML files in data/)"
   echo ""
   echo "Usage: data <command> [args]"
   echo ""
   echo "Commands:"
   echo "  status             Show data files and entry counts"
-  echo "  check              Run all module validation checks"
+  echo "  check              Run lint + referential integrity checks"
+  echo "  lint               Run schema validation only"
   echo "  edit               Open data/ in \$EDITOR"
   echo "  log                Show git history for data/"
   echo "  diff               Show uncommitted changes to data/"
+  echo "  changelog <domain> [--since date]  Show structured change history"
   echo "  help               Show this help"
   echo ""
-  echo "Data files live in data/<domain>/*.csv and are versioned by git."
+  echo "Data files live in data/<domain>.yaml and are versioned by git."
 }
 
 case "${1:-help}" in
-  status)   cmd_status ;;
-  check)    cmd_check ;;
-  edit)     cmd_edit ;;
-  log)      shift; cmd_log "$@" ;;
-  diff)     shift; cmd_diff "$@" ;;
-  help|*)   cmd_help ;;
+  status)    cmd_status ;;
+  check)     cmd_check ;;
+  lint)      cmd_lint ;;
+  edit)      cmd_edit ;;
+  log)       shift; cmd_log "$@" ;;
+  diff)      shift; cmd_diff "$@" ;;
+  changelog) shift; cmd_changelog "$@" ;;
+  help|*)    cmd_help ;;
 esac

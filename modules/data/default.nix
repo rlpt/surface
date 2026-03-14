@@ -2,8 +2,8 @@
 
 {
   name = "data";
-  description = "Company data (TOML files in data/)";
-  packages = with pkgs; [ dolt ];  # dolt kept available for future use
+  description = "Company data (YAML files in data/)";
+  packages = with pkgs; [ dolt python3Packages.pyyaml ];
   scripts = [
     (pkgs.writeShellScriptBin "data" (builtins.readFile ./scripts/data.sh))
   ];

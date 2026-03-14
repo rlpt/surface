@@ -1,11 +1,14 @@
-Shares (cap table management — dolt):
+Shares (cap table management):
   shares table                              Cap table with percentages
   shares holders                            List all shareholders
   shares history [holder]                   Share events (optionally filtered)
+  shares vesting [holder]                   Vesting schedules
   shares pools                              Pool budgets and usage
   shares check                              Validate consistency
-  shares grant <holder> <class> <qty>       Grant shares
+  shares model round <amount> <pre-money>   Simulate funding round dilution
+  shares model pool-expand <pool> <qty>     Model pool expansion impact
+  shares grant <holder> <class> <qty> [--vesting-months N] [--cliff-months N]
   shares transfer <from> <to> <class> <qty> Transfer shares
   shares add-holder <id> "Name"             Add a shareholder
   shares push <table|history|holders|pools|all>  Push to Google Sheets
-  shares pdf <table|history|holder <id>>    Generate PDF
+  shares pdf <table|history|holder|vesting|certificate|transfer>

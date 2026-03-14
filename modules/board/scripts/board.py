@@ -281,6 +281,121 @@ def cmd_vote(args):
 
 
 # ---------------------------------------------------------------------------
+# Templates
+# ---------------------------------------------------------------------------
+
+TEMPLATES = {
+    "allotment": {
+        "description": "Allot shares to a holder",
+        "resolution": "RESOLVED that the directors allot {qty} {share_class} shares to {holder_name}, credited as fully paid.",
+        "minute": "The board resolved to allot {qty} {share_class} shares to {holder_name}.",
+    },
+    "appointment": {
+        "description": "Appoint a director",
+        "resolution": "RESOLVED that {person_name} be appointed as a director of the company with effect from {date}.",
+        "minute": "The board resolved to appoint {person_name} as director.",
+    },
+    "resignation": {
+        "description": "Accept director resignation",
+        "resolution": "RESOLVED that the resignation of {person_name} as director be accepted with effect from {date}.",
+        "minute": "The board noted and accepted the resignation of {person_name} as director.",
+    },
+    "dividend": {
+        "description": "Declare a dividend",
+        "resolution": "RESOLVED that an interim dividend of {amount} per {share_class} share be declared, payable on {date}.",
+        "minute": "The board declared an interim dividend of {amount} per {share_class} share.",
+    },
+    "accounts": {
+        "description": "Approve annual accounts",
+        "resolution": "RESOLVED that the annual accounts for the period ending {date} be approved and signed.",
+        "minute": "The board approved the annual accounts for the period ending {date}.",
+    },
+    "bank-mandate": {
+        "description": "Update bank mandate",
+        "resolution": "RESOLVED that the bank mandate be updated to add {person_name} as an authorised signatory.",
+        "minute": "The board resolved to update the bank mandate to add {person_name}.",
+    },
+}
+
+
+def cmd_template_list():
+    print(f"{'Template':<16} Description")
+    print("-" * 50)
+    for name, t in sorted(TEMPLATES.items()):
+        print(f"{name:<16} {t['description']}")
+
+
+def cmd_template_apply(args):
+    if len(args) < 2:
+        die("usage: board template <name> <meeting-id> [key=value ...]")
+    tname = args[0]
+    meeting_id = args[1]
+
+    if tname not in TEMPLATES:
+        die(f"unknown template: {tname} (use 'board template list')")
+
+    # Parse key=value args
+    kwargs = {"date": date.today().isoformat()}
+    for arg in args[2:]:
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            kwargs[k] = v
+
+    template = TEMPLATES[tname]
+    try:
+        resolution_text = template["resolution"].format(**kwargs)
+        minute_text = template["minute"].format(**kwargs)
+    except KeyError as e:
+        die(f"missing template parameter: {e} (pass as key=value)")
+
+    data = datalib.load("board")
+
+    # Ensure meeting exists
+    meeting_ids = {m["id"] for m in data.get("board_meetings", [])}
+    if meeting_id not in meeting_ids:
+        die(f"meeting '{meeting_id}' not found")
+
+    # Add resolution
+    if "board_resolutions" not in data:
+        data["board_resolutions"] = []
+    count = len([r for r in data["board_resolutions"] if r["meeting_id"] == meeting_id])
+    seq = count + 1
+    rid = f"{meeting_id}-r{seq}"
+    data["board_resolutions"].append({
+        "id": rid,
+        "meeting_id": meeting_id,
+        "resolution_text": resolution_text,
+        "status": "pending",
+    })
+
+    # Add minute item
+    if "board_minutes" not in data:
+        data["board_minutes"] = []
+    existing_seqs = [mi["seq"] for mi in data["board_minutes"] if mi["meeting_id"] == meeting_id]
+    next_seq = max(existing_seqs, default=0) + 1
+    data["board_minutes"].append({
+        "meeting_id": meeting_id,
+        "seq": next_seq,
+        "item_text": minute_text,
+    })
+
+    datalib.save("board", data)
+    datalib.git_commit(f"board: apply template '{tname}' to {meeting_id}")
+    print(f"Applied template '{tname}' to {meeting_id}")
+    print(f"  Resolution: {rid}")
+    print(f"  Minute item: {next_seq}")
+
+
+def cmd_template(args):
+    subcmd = args[0] if args else "list"
+    match subcmd:
+        case "list":
+            cmd_template_list()
+        case _:
+            cmd_template_apply(args)
+
+
+# ---------------------------------------------------------------------------
 # HTML output
 # ---------------------------------------------------------------------------
 
@@ -679,23 +794,7 @@ def cmd_serve(args):
 # ---------------------------------------------------------------------------
 
 def generate_pdf(output_file, markdown):
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    subprocess.run(
-        [
-            "pandoc",
-            "--pdf-engine=typst",
-            "-V", "mainfont=Helvetica",
-            "-V", "margin-top=2cm",
-            "-V", "margin-bottom=2cm",
-            "-V", "margin-left=2cm",
-            "-V", "margin-right=2cm",
-            "-o", output_file,
-        ],
-        input=markdown,
-        text=True,
-        check=True,
-    )
-    print(output_file)
+    datalib.generate_branded_pdf(output_file, markdown)
 
 
 def meeting_markdown(meeting_id):
@@ -880,6 +979,8 @@ def main():
             cmd_resolve(args[1:])
         case "vote":
             cmd_vote(args[1:])
+        case "template":
+            cmd_template(args[1:])
         case _:
             cmd_help()
 
