@@ -1,2 +1,0 @@
-Image Upload (phone camera via QR):
-  image-upload                  Start upload session (displays QR code)
