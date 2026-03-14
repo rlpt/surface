@@ -64,7 +64,7 @@ in
 
 ### Working example
 
-`modules/marketing/default.nix` imports brand identity from `modules/brand/` with a full fallback:
+Any module can import brand identity from `modules/brand/` with a full fallback:
 
 ```nix
 brandIdentity =
@@ -73,7 +73,7 @@ brandIdentity =
   else { name = "Formabi"; strapLine = "..."; colors = { ... }; logoPath = "..."; };
 ```
 
-The resolved `brandIdentity` is then exposed as a module attribute, so the flake can also access it via `modulesByName.marketing.brandIdentity`.
+The resolved `brandIdentity` is then exposed as a module attribute, accessible to sibling modules and the flake via `modulesByName`.
 
 ## How auto-discovery works
 
