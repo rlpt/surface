@@ -1,0 +1,174 @@
+board_meetings:
+  - id: bm-2025-06-15
+    meeting_date: 2025-06-15
+    title: Incorporation Meeting
+    location: 14 Mill Lane, Cambridge
+    status: completed
+    called_by: Richard Targett
+
+  - id: bm-2025-09-20
+    meeting_date: 2025-09-20
+    title: Q3 Review & Product Strategy
+    location: Remote (Google Meet)
+    status: completed
+    called_by: Richard Targett
+
+  - id: bm-2025-12-10
+    meeting_date: 2025-12-10
+    title: Year-End Review & 2026 Planning
+    location: 14 Mill Lane, Cambridge
+    status: completed
+    called_by: Richard Targett
+
+  - id: bm-2026-03-18
+    meeting_date: 2026-03-18
+    title: Q1 Review & Fundraising Update
+    location: Remote (Google Meet)
+    status: scheduled
+    called_by: Richard Targett
+
+board_attendees:
+  - meeting_id: bm-2025-06-15
+    person_name: Richard Targett
+    role: chair
+  - meeting_id: bm-2025-06-15
+    person_name: Mark Holland
+    role: secretary
+
+  - meeting_id: bm-2025-09-20
+    person_name: Richard Targett
+    role: chair
+  - meeting_id: bm-2025-09-20
+    person_name: Mark Holland
+    role: secretary
+  - meeting_id: bm-2025-09-20
+    person_name: Emma Loxley
+    role: observer
+
+  - meeting_id: bm-2025-12-10
+    person_name: Richard Targett
+    role: chair
+  - meeting_id: bm-2025-12-10
+    person_name: Mark Holland
+    role: secretary
+  - meeting_id: bm-2025-12-10
+    person_name: Emma Loxley
+    role: director
+
+  - meeting_id: bm-2026-03-18
+    person_name: Richard Targett
+    role: chair
+  - meeting_id: bm-2026-03-18
+    person_name: Mark Holland
+    role: secretary
+  - meeting_id: bm-2026-03-18
+    person_name: Emma Loxley
+    role: director
+
+board_minutes:
+  - meeting_id: bm-2025-06-15
+    seq: 1
+    item_text: Meeting called to order at 10:00. Quorum confirmed.
+  - meeting_id: bm-2025-06-15
+    seq: 2
+    item_text: Reviewed and approved Articles of Association as drafted by solicitors.
+  - meeting_id: bm-2025-06-15
+    seq: 3
+    item_text: Appointed Richard Targett as sole director. Mark Holland appointed company secretary.
+  - meeting_id: bm-2025-06-15
+    seq: 4
+    item_text: Authorised 10,000 ordinary shares at £0.01 nominal value. Initial grant of 1,000 shares to Richard Targett.
+  - meeting_id: bm-2025-06-15
+    seq: 5
+    item_text: Resolved to open business account with Tide. Richard authorised as sole signatory.
+  - meeting_id: bm-2025-06-15
+    seq: 6
+    item_text: Meeting adjourned at 11:15.
+
+  - meeting_id: bm-2025-09-20
+    seq: 1
+    item_text: Meeting called to order at 14:00 via Google Meet.
+  - meeting_id: bm-2025-09-20
+    seq: 2
+    item_text: Reviewed bank balance of £4,200. Noted hosting costs running at £85/month.
+  - meeting_id: bm-2025-09-20
+    seq: 3
+    item_text: Discussed product roadmap. Agreed to prioritise company-as-code tooling over consulting pipeline.
+  - meeting_id: bm-2025-09-20
+    seq: 4
+    item_text: Emma Loxley presented early design work. Board agreed to formalise her involvement.
+  - meeting_id: bm-2025-09-20
+    seq: 5
+    item_text: Meeting adjourned at 15:30.
+
+  - meeting_id: bm-2025-12-10
+    seq: 1
+    item_text: Meeting called to order at 10:00. Quorum confirmed.
+  - meeting_id: bm-2025-12-10
+    seq: 2
+    item_text: Reviewed year-end financials. Total revenue £12,400, expenses £8,900, net position £3,500.
+  - meeting_id: bm-2025-12-10
+    seq: 3
+    item_text: Approved share transfers — 10 shares to Mark Holland, 69 shares to Emma Loxley — recognising contributions.
+  - meeting_id: bm-2025-12-10
+    seq: 4
+    item_text: Approved additional grant of 7,079 shares to Richard Targett to fill founder pool allocation.
+  - meeting_id: bm-2025-12-10
+    seq: 5
+    item_text: Discussed 2026 goals — target first paying customer by Q2, explore pre-seed fundraising.
+  - meeting_id: bm-2025-12-10
+    seq: 6
+    item_text: Appointed Emma Loxley as director, effective immediately.
+  - meeting_id: bm-2025-12-10
+    seq: 7
+    item_text: Meeting adjourned at 12:45.
+
+board_resolutions:
+  - id: bm-2025-06-15-r1
+    meeting_id: bm-2025-06-15
+    resolution_text: Adopt the Articles of Association as presented.
+    status: passed
+    proposed_by: Richard Targett
+    voted_date: 2025-06-15
+
+  - id: bm-2025-06-15-r2
+    meeting_id: bm-2025-06-15
+    resolution_text: Appoint Richard Targett as director and Mark Holland as company secretary.
+    status: passed
+    proposed_by: Richard Targett
+    voted_date: 2025-06-15
+
+  - id: bm-2025-06-15-r3
+    meeting_id: bm-2025-06-15
+    resolution_text: Authorise 10,000 ordinary shares at £0.01 and grant 1,000 to Richard Targett.
+    status: passed
+    proposed_by: Richard Targett
+    voted_date: 2025-06-15
+
+  - id: bm-2025-09-20-r1
+    meeting_id: bm-2025-09-20
+    resolution_text: Prioritise product development over consulting for Q4 2025.
+    status: passed
+    proposed_by: Richard Targett
+    voted_date: 2025-09-20
+
+  - id: bm-2025-12-10-r1
+    meeting_id: bm-2025-12-10
+    resolution_text: Approve transfer of 10 ordinary shares to Mark Holland and 69 ordinary shares to Emma Loxley.
+    status: passed
+    proposed_by: Richard Targett
+    voted_date: 2025-12-10
+
+  - id: bm-2025-12-10-r2
+    meeting_id: bm-2025-12-10
+    resolution_text: Approve grant of 7,079 ordinary shares to Richard Targett.
+    status: passed
+    proposed_by: Mark Holland
+    voted_date: 2025-12-10
+
+  - id: bm-2025-12-10-r3
+    meeting_id: bm-2025-12-10
+    resolution_text: Appoint Emma Loxley as director of Formabi Ltd.
+    status: passed
+    proposed_by: Richard Targett
+    voted_date: 2025-12-10
