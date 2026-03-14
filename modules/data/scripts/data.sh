@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.join('$SURFACE_ROOT', 'modules', 'data', 'scripts'))
 import datalib
 
 all_errors = []
-for domain in ['shares', 'accounts', 'officers', 'compliance', 'board']:
+for domain in ['shares', 'officers', 'compliance', 'board']:
     data = datalib.load(domain)
 
     # Schema lint
@@ -66,7 +66,7 @@ sys.path.insert(0, os.path.join('$SURFACE_ROOT', 'modules', 'data', 'scripts'))
 import datalib
 
 all_errors = []
-for domain in ['shares', 'accounts', 'officers', 'compliance', 'board']:
+for domain in ['shares', 'officers', 'compliance', 'board']:
     data = datalib.load(domain)
     errs = datalib.lint(domain, data)
     for e in errs:

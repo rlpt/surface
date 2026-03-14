@@ -20,20 +20,6 @@ SHARES_DATA = {
     "pool_members": [{"pool_name": "founder", "holder_id": "richard"}],
 }
 
-ACCT_DATA = {
-    "accounts": [
-        {"path": "assets:bank:tide", "account_type": "assets"},
-        {"path": "expenses:infra:hosting", "account_type": "expenses"},
-    ],
-    "transactions": [
-        {"id": 1, "txn_date": "2026-03-01", "payee": "AWS", "description": "Hosting"},
-    ],
-    "postings": [
-        {"txn_id": 1, "account_path": "expenses:infra:hosting", "amount": 45.0, "currency": "GBP"},
-        {"txn_id": 1, "account_path": "assets:bank:tide", "amount": -45.0, "currency": "GBP"},
-    ],
-}
-
 OFFICERS_DATA = {
     "officers": [
         {"id": "richard", "person_name": "Richard Targett", "role": "director", "appointed_date": "2025-06-15"},
@@ -130,7 +116,6 @@ class TestPage(unittest.TestCase):
         result = dashboard.page("Title", "body")
         self.assertIn("Overview", result)
         self.assertIn("Cap Table", result)
-        self.assertIn("Accounts", result)
         self.assertIn("Officers", result)
         self.assertIn("Compliance", result)
 
@@ -155,7 +140,7 @@ class TestBuildPages(unittest.TestCase):
     @patch("datalib.load")
     def test_build_index(self, mock_load, mock_changelog):
         mock_load.side_effect = lambda d: {
-            "shares": SHARES_DATA, "accounts": ACCT_DATA,
+            "shares": SHARES_DATA,
             "officers": OFFICERS_DATA, "compliance": COMPLIANCE_DATA,
         }[d]
         mock_changelog.return_value = []
@@ -171,13 +156,6 @@ class TestBuildPages(unittest.TestCase):
         html = dashboard.build_cap_table()
         self.assertIn("Cap Table", html)
         self.assertIn("richard", html)
-
-    @patch("datalib.load")
-    def test_build_accounts(self, mock_load):
-        mock_load.return_value = ACCT_DATA
-        html = dashboard.build_accounts()
-        self.assertIn("Accounts", html)
-        self.assertIn("assets:bank:tide", html)
 
     @patch("datalib.load")
     def test_build_officers(self, mock_load):

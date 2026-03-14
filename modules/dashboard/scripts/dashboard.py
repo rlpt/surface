@@ -69,7 +69,6 @@ def page(title, body, nav_active=""):
     nav_items = [
         ("index.html", "Overview"),
         ("cap-table.html", "Cap Table"),
-        ("accounts.html", "Accounts"),
         ("officers.html", "Officers"),
         ("compliance.html", "Compliance"),
     ]
@@ -230,7 +229,6 @@ footer {{
 
 def build_index():
     shares_data = datalib.load("shares")
-    acct_data = datalib.load("accounts")
     officers_data = datalib.load("officers")
     comp_data = datalib.load("compliance")
 
@@ -248,10 +246,6 @@ def build_index():
     upcoming = datalib.compliance_upcoming(comp_data)
     num_upcoming = len(upcoming)
 
-    # Accounts metrics
-    num_accounts = len(acct_data.get("accounts", []))
-    num_txns = len(acct_data.get("transactions", []))
-
     cards = f"""
 <p class="subtitle">Company snapshot — read-only view of all company data</p>
 <div class="cards">
@@ -259,8 +253,6 @@ def build_index():
   <div class="card"><div class="label">Shares Issued</div><div class="value">{esc(shares_issued)}</div></div>
   <div class="card"><div class="label">Officers</div><div class="value">{esc(num_officers)}</div></div>
   <div class="card"><div class="label">Compliance Due</div><div class="value">{esc(num_upcoming)}</div></div>
-  <div class="card"><div class="label">Accounts</div><div class="value">{esc(num_accounts)}</div></div>
-  <div class="card"><div class="label">Transactions</div><div class="value">{esc(num_txns)}</div></div>
 </div>
 """
 
@@ -277,7 +269,7 @@ def build_index():
 
     # Recent changes
     changes = []
-    for domain in ["shares", "accounts", "officers", "compliance", "board"]:
+    for domain in ["shares", "officers", "compliance", "board"]:
         changes.extend(
             {**c, "domain": domain} for c in datalib.changelog(domain)[:5]
         )
@@ -341,46 +333,6 @@ def build_cap_table():
     body += "<h2>Pools</h2>\n" + html_table(pools_display)
     body += "<h2>Event History</h2>\n" + html_table(events_display)
     return page("Cap Table", body, "cap-table")
-
-
-def build_accounts():
-    acct_data = datalib.load("accounts")
-
-    balances = datalib.account_balances(acct_data)
-    balances_display = [
-        {
-            "account_path": r["account_path"],
-            "account_type": r["account_type"],
-            "balance": r["balance"],
-            "currency": r["currency"],
-        }
-        for r in balances
-    ]
-
-    # Recent transactions with their postings
-    txns = acct_data.get("transactions", [])
-    postings = acct_data.get("postings", [])
-    postings_by_txn = {}
-    for p in postings:
-        postings_by_txn.setdefault(p["txn_id"], []).append(p)
-
-    recent_txns = sorted(txns, key=lambda t: (str(t.get("txn_date", "")), t.get("id", 0)), reverse=True)
-    recent_display = []
-    for t in recent_txns[:30]:
-        for p in postings_by_txn.get(t["id"], []):
-            recent_display.append({
-                "txn_date": t.get("txn_date", ""),
-                "payee": t.get("payee", ""),
-                "description": t.get("description", ""),
-                "account_path": p["account_path"],
-                "amount": p["amount"],
-                "currency": p.get("currency", "GBP"),
-            })
-
-    body = '<p class="subtitle">Double-entry bookkeeping — balances and transactions</p>'
-    body += "<h2>Account Balances</h2>\n" + html_table(balances_display)
-    body += "<h2>Recent Transactions</h2>\n" + html_table(recent_display)
-    return page("Accounts", body, "accounts")
 
 
 def build_officers():
@@ -455,7 +407,6 @@ def cmd_build(args):
     pages = {
         "index.html": build_index,
         "cap-table.html": build_cap_table,
-        "accounts.html": build_accounts,
         "officers.html": build_officers,
         "compliance.html": build_compliance,
     }

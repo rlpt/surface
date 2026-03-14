@@ -4,7 +4,7 @@ Auto-discovered child directories under `modules/`. Each module is a `default.ni
 
 ## Data layer
 
-Structured data (accounts, shares, pools, holders, officers, compliance, board) is stored as YAML files in `data/` at the project root, versioned by git. The shared library `modules/data/scripts/datalib.py` loads/saves YAML, provides schema linting (`datalib.lint()`), referential integrity checks (`datalib.validate_refs()`), and computed views (holdings, cap table, account balances, vesting schedules, compliance deadlines). Query with Python: `datalib.load("shares")`. Version data changes with `git commit`.
+Structured data (shares, pools, holders, officers, compliance, board) is stored as YAML files in `data/` at the project root, versioned by git. The shared library `modules/data/scripts/datalib.py` loads/saves YAML, provides schema linting (`datalib.lint()`), referential integrity checks (`datalib.validate_refs()`), and computed views (holdings, cap table, account balances, vesting schedules, compliance deadlines). Query with Python: `datalib.load("shares")`. Version data changes with `git commit`.
 
 ## Module contract
 

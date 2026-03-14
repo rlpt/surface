@@ -5,7 +5,6 @@ Company data stored as YAML files in `data/` at the project root, versioned by g
 ## Files
 
 - `data/shares.yaml` — share classes, holders, events, pools, pool members
-- `data/accounts.yaml` — chart of accounts, transactions, postings
 - `data/officers.yaml` — company officers (directors, secretary, PSC)
 - `data/compliance.yaml` — statutory compliance deadlines
 - `data/board.yaml` — meetings, attendees, minutes, resolutions
@@ -30,7 +29,6 @@ datalib.validate_refs("shares", data)  # returns list of error strings
 datalib.holdings(share_data)         # current holdings per holder/class
 datalib.cap_table(share_data)        # cap table with percentages
 datalib.class_availability(share_data)  # issued vs authorised
-datalib.account_balances(acct_data)  # aggregated balances
 datalib.vesting_schedule(share_data) # per-holder vesting status
 datalib.compliance_upcoming(comp_data) # deadlines due within 90 days
 datalib.changelog(domain, since)     # structured git log for a domain

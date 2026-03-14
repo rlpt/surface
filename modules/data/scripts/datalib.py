@@ -142,23 +142,6 @@ SCHEMAS = {
             "values": {},
         },
     },
-    "accounts": {
-        "accounts": {
-            "required": ["path", "account_type"],
-            "types": {"path": str, "account_type": str},
-            "values": {"account_type": ["assets", "liabilities", "expenses", "revenue", "equity"]},
-        },
-        "transactions": {
-            "required": ["id", "txn_date", "payee"],
-            "types": {"id": (int, str), "txn_date": str, "payee": str},
-            "values": {},
-        },
-        "postings": {
-            "required": ["txn_id", "account_path", "amount"],
-            "types": {"txn_id": (int, str), "account_path": str, "amount": (int, float)},
-            "values": {},
-        },
-    },
     "officers": {
         "officers": {
             "required": ["id", "person_name", "role", "appointed_date"],
@@ -336,32 +319,6 @@ def class_availability(share_data=None):
     return result
 
 
-def account_balances(acct_data=None):
-    """Compute account balances from postings.
-
-    Returns list of dicts: [{"account_path", "account_type", "balance", "currency"}, ...]
-    """
-    if acct_data is None:
-        acct_data = load("accounts")
-    accounts_map = {
-        a["path"]: a["account_type"] for a in acct_data.get("accounts", [])
-    }
-    balances = defaultdict(lambda: defaultdict(float))
-    for p in acct_data.get("postings", []):
-        key = p["account_path"]
-        currency = p.get("currency", "GBP")
-        balances[key][currency] += p["amount"]
-    result = []
-    for path in sorted(balances.keys()):
-        for currency, balance in balances[path].items():
-            result.append({
-                "account_path": path,
-                "account_type": accounts_map.get(path, "unknown"),
-                "balance": round(balance, 2),
-                "currency": currency,
-            })
-    result.sort(key=lambda x: (x["account_type"], x["account_path"]))
-    return result
 
 
 def vesting_schedule(share_data=None):
@@ -518,12 +475,6 @@ def validate_refs(domain, data):
         _check(data.get("pools", []), "share_class", class_names, "pools")
         _check(data.get("pool_members", []), "holder_id", holder_ids, "pool_members")
         _check(data.get("pool_members", []), "pool_name", pool_names, "pool_members")
-
-    elif domain == "accounts":
-        account_paths = {a["path"] for a in data.get("accounts", [])}
-        txn_ids = {t["id"] for t in data.get("transactions", [])}
-        _check(data.get("postings", []), "account_path", account_paths, "postings")
-        _check(data.get("postings", []), "txn_id", txn_ids, "postings")
 
     elif domain == "board":
         meeting_ids = {m["id"] for m in data.get("board_meetings", [])}

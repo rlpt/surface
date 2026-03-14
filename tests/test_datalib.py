@@ -207,44 +207,6 @@ class TestClassAvailability(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# account_balances()
-# ---------------------------------------------------------------------------
-
-class TestAccountBalances(unittest.TestCase):
-    def test_no_postings(self):
-        data = {"accounts": [{"path": "assets:bank", "account_type": "assets"}], "postings": []}
-        result = datalib.account_balances(data)
-        self.assertEqual(result, [])
-
-    def test_balanced_transaction(self):
-        data = {
-            "accounts": [
-                {"path": "expenses:hosting", "account_type": "expenses"},
-                {"path": "assets:bank", "account_type": "assets"},
-            ],
-            "postings": [
-                {"txn_id": 1, "account_path": "expenses:hosting", "amount": 45.0, "currency": "GBP"},
-                {"txn_id": 1, "account_path": "assets:bank", "amount": -45.0, "currency": "GBP"},
-            ],
-        }
-        result = datalib.account_balances(data)
-        by_path = {r["account_path"]: r for r in result}
-        self.assertEqual(by_path["expenses:hosting"]["balance"], 45.0)
-        self.assertEqual(by_path["assets:bank"]["balance"], -45.0)
-
-    def test_multiple_transactions_aggregate(self):
-        data = {
-            "accounts": [{"path": "expenses:hosting", "account_type": "expenses"}],
-            "postings": [
-                {"txn_id": 1, "account_path": "expenses:hosting", "amount": 45.0, "currency": "GBP"},
-                {"txn_id": 2, "account_path": "expenses:hosting", "amount": 55.0, "currency": "GBP"},
-            ],
-        }
-        result = datalib.account_balances(data)
-        self.assertEqual(result[0]["balance"], 100.0)
-
-
-# ---------------------------------------------------------------------------
 # vesting_schedule()
 # ---------------------------------------------------------------------------
 
@@ -403,27 +365,6 @@ class TestValidateRefs(unittest.TestCase):
         errors = datalib.validate_refs("shares", data)
         self.assertTrue(any("ghost" in e for e in errors))
 
-    def test_clean_accounts_data(self):
-        data = {
-            "accounts": [{"path": "expenses:hosting", "account_type": "expenses"}],
-            "transactions": [{"id": 1, "txn_date": "2026-01-01", "payee": "AWS", "description": "Hosting"}],
-            "postings": [
-                {"txn_id": 1, "account_path": "expenses:hosting", "amount": 45.0, "currency": "GBP"},
-            ],
-        }
-        self.assertEqual(datalib.validate_refs("accounts", data), [])
-
-    def test_orphan_account_in_postings(self):
-        data = {
-            "accounts": [{"path": "expenses:hosting", "account_type": "expenses"}],
-            "transactions": [],
-            "postings": [
-                {"txn_id": 1, "account_path": "expenses:unknown", "amount": 45.0, "currency": "GBP"},
-            ],
-        }
-        errors = datalib.validate_refs("accounts", data)
-        self.assertTrue(any("expenses:unknown" in e for e in errors))
-
     def test_clean_board_data(self):
         data = {
             "board_meetings": [{"id": "bm-2026-01-01", "meeting_date": "2026-01-01", "title": "Q1"}],
@@ -492,12 +433,6 @@ class TestLint(unittest.TestCase):
         errors = datalib.lint("shares", data)
         self.assertTrue(any("steal" in e for e in errors))
 
-    def test_invalid_account_type(self):
-        data = {
-            "accounts": [{"path": "misc:stuff", "account_type": "magic"}],
-        }
-        errors = datalib.lint("accounts", data)
-        self.assertTrue(any("magic" in e for e in errors))
 
     def test_unknown_domain_no_errors(self):
         self.assertEqual(datalib.lint("unknown", {"foo": [{"a": 1}]}), [])
