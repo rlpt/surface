@@ -11,3 +11,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           /run/wrappers/bin/sudo /run/current-system/sw/bin/deploy-surface /tmp/surface-site
+      - name: Upload PDFs to Google Drive
+        if: github.ref == 'refs/heads/main'
+        run: |
+          /run/wrappers/bin/sudo /run/current-system/sw/bin/upload-to-drive /tmp/surface-site
